@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "AniFlow",
+  "version": "2.0.0",
+  "description": "Fluid & ambient anime tracker for AniList with real-time sync, micro-celebrations & multi-genre discover.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AniFlow",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://graphql.anilist.co/*",
+    "https://anilist.co/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
