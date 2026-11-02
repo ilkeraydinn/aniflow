@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { ThemeMode } from '../types';
 import { storageService } from '../services/storage';
 
@@ -10,18 +10,30 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+function getSystemDark(): boolean {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  return false;
+}
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<ThemeMode>('system');
-  const [systemDark, setSystemDark] = useState<boolean>(() => {
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const [systemDark, setSystemDark] = useState<boolean>(getSystemDark);
+  const [theme, setThemeState] = useState<ThemeMode>(() => {
+    const syncTheme = storageService.getThemeSync();
+    if (typeof document !== 'undefined') {
+      const initialResolved =
+        syncTheme === 'system' ? (getSystemDark() ? 'dark' : 'light') : syncTheme;
+      document.documentElement.setAttribute('data-theme', initialResolved);
     }
-    return false;
+    return syncTheme;
   });
 
   useEffect(() => {
     storageService.getTheme().then((saved) => {
-      if (saved) setThemeState(saved);
+      if (saved) {
+        setThemeState((prev) => (prev === saved ? prev : saved));
+      }
     });
 
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -39,13 +51,18 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     document.documentElement.setAttribute('data-theme', resolvedTheme);
   }, [resolvedTheme]);
 
-  const setTheme = async (newTheme: ThemeMode) => {
+  const setTheme = useCallback(async (newTheme: ThemeMode) => {
     setThemeState(newTheme);
     await storageService.setTheme(newTheme);
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({ theme, resolvedTheme, setTheme }),
+    [theme, resolvedTheme, setTheme]
+  );
 
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

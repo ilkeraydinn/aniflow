@@ -6,6 +6,10 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [react()],
   build: {
+    target: 'chrome120',
+    modulePreload: {
+      polyfill: false
+    },
     outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: {

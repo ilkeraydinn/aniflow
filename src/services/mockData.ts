@@ -3,6 +3,8 @@ import { NormalizedAnimeItem, UserProfile } from '../types';
 export const MOCK_USER_PROFILE: UserProfile = {
   id: 849201,
   name: 'ilker_san',
+  bannerImage: null,
+  profileColor: 'blue',
   avatar: {
     large: 'https://s4.anilist.co/file/anilistcdn/user/avatar/large/default.png',
     medium: 'https://s4.anilist.co/file/anilistcdn/user/avatar/medium/default.png'
@@ -12,6 +14,7 @@ export const MOCK_USER_PROFILE: UserProfile = {
     completed: 184,
     planning: 42,
     paused: 3,
+    dropped: 2,
     episodesWatched: 2450,
     minutesWatched: 58800,
     daysWatched: 40.8,
@@ -39,6 +42,7 @@ export const MOCK_WATCHING_LIST: NormalizedAnimeItem[] = [
     episodes: 28,
     status: 'CURRENT',
     format: 'TV',
+    genres: ['Adventure', 'Drama', 'Fantasy'],
     siteUrl: 'https://anilist.co/anime/154587',
     nextAiringEpisode: {
       episode: 19,
@@ -58,6 +62,7 @@ export const MOCK_WATCHING_LIST: NormalizedAnimeItem[] = [
     episodes: 24,
     status: 'CURRENT',
     format: 'TV',
+    genres: ['Drama', 'Mystery'],
     siteUrl: 'https://anilist.co/anime/153518',
     nextAiringEpisode: {
       episode: 15,
@@ -126,6 +131,7 @@ export const MOCK_SEARCH_RESULTS: NormalizedAnimeItem[] = [
     episodes: 26,
     status: 'PLANNING',
     format: 'TV',
+    seasonYear: 2019,
     genres: ['Action', 'Fantasy', 'Supernatural'],
     siteUrl: 'https://anilist.co/anime/101922'
   },
@@ -140,6 +146,7 @@ export const MOCK_SEARCH_RESULTS: NormalizedAnimeItem[] = [
     episodes: 148,
     status: 'PLANNING',
     format: 'TV',
+    seasonYear: 2011,
     genres: ['Action', 'Adventure', 'Fantasy'],
     siteUrl: 'https://anilist.co/anime/11061'
   },
@@ -154,6 +161,7 @@ export const MOCK_SEARCH_RESULTS: NormalizedAnimeItem[] = [
     episodes: 24,
     status: 'PLANNING',
     format: 'TV',
+    seasonYear: 2020,
     genres: ['Action', 'Fantasy', 'Supernatural'],
     siteUrl: 'https://anilist.co/anime/113415'
   },
@@ -168,6 +176,7 @@ export const MOCK_SEARCH_RESULTS: NormalizedAnimeItem[] = [
     episodes: 12,
     status: 'PLANNING',
     format: 'TV',
+    seasonYear: 2022,
     genres: ['Action', 'Comedy', 'Slice of Life'],
     siteUrl: 'https://anilist.co/anime/140960'
   },
@@ -182,6 +191,7 @@ export const MOCK_SEARCH_RESULTS: NormalizedAnimeItem[] = [
     episodes: null,
     status: 'PLANNING',
     format: 'TV',
+    seasonYear: 2026,
     genres: ['Adventure', 'Drama', 'Fantasy'],
     siteUrl: 'https://anilist.co/anime/173516'
   },
@@ -196,6 +206,7 @@ export const MOCK_SEARCH_RESULTS: NormalizedAnimeItem[] = [
     episodes: 1,
     status: 'PLANNING',
     format: 'MOVIE',
+    seasonYear: 2025,
     genres: ['Action', 'Drama', 'Supernatural'],
     siteUrl: 'https://anilist.co/anime/172698'
   },

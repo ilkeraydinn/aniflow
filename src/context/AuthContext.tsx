@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { UserProfile } from '../types';
 import { authService } from '../services/auth';
 import { anilistService } from '../services/anilistClient';
@@ -24,11 +24,14 @@ function isEqualProfile(a: UserProfile | null, b: UserProfile | null): boolean {
   return (
     a.id === b.id &&
     a.name === b.name &&
+    a.bannerImage === b.bannerImage &&
+    a.profileColor === b.profileColor &&
     a.avatar?.large === b.avatar?.large &&
     a.stats?.watching === b.stats?.watching &&
     a.stats?.completed === b.stats?.completed &&
     a.stats?.planning === b.stats?.planning &&
     a.stats?.paused === b.stats?.paused &&
+    a.stats?.dropped === b.stats?.dropped &&
     a.stats?.episodesWatched === b.stats?.episodesWatched
   );
 }
@@ -89,7 +92,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [checkAuth]);
 
 
-  const loginWithOAuth = async (clientId?: string) => {
+  const loginWithOAuth = useCallback(async (clientId?: string) => {
     try {
       setIsLoading(true);
       setError(null);
@@ -103,9 +106,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const loginWithToken = async (token: string) => {
+  const loginWithToken = useCallback(async (token: string) => {
     try {
       setIsLoading(true);
       setError(null);
@@ -118,9 +121,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const loginAsDemo = async () => {
+  const loginAsDemo = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
@@ -133,9 +136,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       setIsLoading(true);
       await authService.logout();
@@ -145,7 +148,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   const refreshProfile = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -157,23 +160,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [isAuthenticated]);
 
-  const clearError = () => setError(null);
+  const clearError = useCallback(() => setError(null), []);
+
+  const value = useMemo(
+    () => ({
+      user,
+      isAuthenticated,
+      isLoading,
+      error,
+      loginWithOAuth,
+      loginWithToken,
+      loginAsDemo,
+      logout,
+      refreshProfile,
+      clearError
+    }),
+    [
+      user,
+      isAuthenticated,
+      isLoading,
+      error,
+      loginWithOAuth,
+      loginWithToken,
+      loginAsDemo,
+      logout,
+      refreshProfile,
+      clearError
+    ]
+  );
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated,
-        isLoading,
-        error,
-        loginWithOAuth,
-        loginWithToken,
-        loginAsDemo,
-        logout,
-        refreshProfile,
-        clearError
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

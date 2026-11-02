@@ -56,6 +56,7 @@ export interface NormalizedAnimeItem {
   volumes?: number | null;
   status: MediaListStatus;
   format?: string;
+  seasonYear?: number | null;
   type?: MediaType;
   siteUrl?: string;
   isPending?: boolean;
@@ -83,6 +84,7 @@ export interface AnimeRelationItem {
   relationType: string;
   title: string;
   format?: string | null;
+  seasonYear?: number | null;
   type?: MediaType;
   status?: string | null;
   coverImage: string;
@@ -106,6 +108,7 @@ export interface AnimeDetail extends NormalizedAnimeItem {
   genres: string[];
   season?: string | null;
   seasonYear?: number | null;
+  mediaStatus?: MediaStatus | string | null;
   duration?: number | null;
   studios: string[];
   popularity?: number | null;
@@ -122,6 +125,8 @@ export interface UserGenreStat {
 export interface UserProfile {
   id: number;
   name: string;
+  bannerImage?: string | null;
+  profileColor?: string | null;
   avatar: {
     large?: string;
     medium?: string;
@@ -131,6 +136,7 @@ export interface UserProfile {
     completed: number;
     planning: number;
     paused: number;
+    dropped: number;
     episodesWatched?: number;
     minutesWatched?: number;
     daysWatched?: number;
@@ -139,6 +145,8 @@ export interface UserProfile {
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
+
+export type ProfileSortMode = 'SCORE_DESC' | 'TITLE_ASC' | 'AVERAGE_DESC';
 
 export type ActiveTab = 'home' | 'search' | 'profile';
 

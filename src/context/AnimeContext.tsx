@@ -3,7 +3,7 @@ import { NormalizedAnimeItem, MediaListStatus } from '../types';
 import { anilistService } from '../services/anilistClient';
 import { storageService } from '../services/storage';
 import { useAuth } from './AuthContext';
-import { useUI } from './UIContext';
+import { useUIActions } from './UIContext';
 
 export interface AnimeContextType {
   watchingList: NormalizedAnimeItem[];
@@ -24,7 +24,7 @@ const AnimeContext = createContext<AnimeContextType | undefined>(undefined);
 
 export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isAuthenticated } = useAuth();
-  const { showToast, triggerCelebration } = useUI();
+  const { showToast, triggerCelebration } = useUIActions();
 
   const [watchingList, setWatchingList] = useState<NormalizedAnimeItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -35,13 +35,33 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Synchronous ref to freeze pending checks inside useCallback with 0 dependencies
   const pendingMediaIdsRef = useRef<Set<number>>(new Set());
+  // Tracks whether watchingList changed due to local optimistic mutation and should be persisted
+  const shouldPersistWatchingRef = useRef<boolean>(false);
+
+  // O(1) lookup index by mediaId to avoid O(n) linear scans during SearchView / ProfileView renders
+  const watchingMap = useMemo(() => {
+    const map = new Map<number, NormalizedAnimeItem>();
+    for (const item of watchingList) {
+      map.set(item.mediaId, item);
+    }
+    return map;
+  }, [watchingList]);
+
+  useEffect(() => {
+    if (!shouldPersistWatchingRef.current) return;
+    shouldPersistWatchingRef.current = false;
+    storageService.setCachedWatchingList(watchingList).catch(() => {});
+  }, [watchingList]);
 
   const getUserScore = useCallback(
     (mediaId: number, fallbackScore?: number | null): number | null => {
       if (Object.prototype.hasOwnProperty.call(userScoreOverrides, mediaId)) {
-        return userScoreOverrides[mediaId];
+        const override = userScoreOverrides[mediaId];
+        return override !== null && override !== undefined && override > 0 ? override : null;
       }
-      return fallbackScore ?? null;
+      return fallbackScore !== null && fallbackScore !== undefined && fallbackScore > 0
+        ? fallbackScore
+        : null;
     },
     [userScoreOverrides]
   );
@@ -51,14 +71,14 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (Object.prototype.hasOwnProperty.call(userStatusOverrides, mediaId)) {
         return userStatusOverrides[mediaId];
       }
-      // Check if present in active watching list
-      const watchingItem = watchingList.find((item) => item.mediaId === mediaId);
+      // O(1) lookup in active watching list
+      const watchingItem = watchingMap.get(mediaId);
       if (watchingItem) {
         return watchingItem.userStatus || watchingItem.status || 'CURRENT';
       }
       return fallbackStatus ?? null;
     },
-    [userStatusOverrides, watchingList]
+    [userStatusOverrides, watchingMap]
   );
 
   const userId = user?.id;
@@ -78,31 +98,30 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // 1. SWR Pattern: Load from persistent disk storage immediately (0ms delay, no skeleton!)
     let hasCachedData = false;
+    let isFreshCache = false;
     if (!isRefresh) {
       try {
-        const cached = await storageService.getCachedWatchingList();
+        const { list: cached, cachedAt } = await storageService.getCachedWatchingListWithMeta();
         if (cached && cached.length > 0) {
           hasCachedData = true;
-          const sortedCached = [...cached].sort((a, b) => {
-            const aAiring = a.nextAiringEpisode;
-            const bAiring = b.nextAiringEpisode;
-            if (aAiring && bAiring) {
-              const aTime = aAiring.airingAt ?? aAiring.timeUntilAiring;
-              const bTime = bAiring.airingAt ?? bAiring.timeUntilAiring;
-              if (aTime !== bTime) return aTime - bTime;
-            } else if (aAiring && !bAiring) {
-              return -1;
-            } else if (!aAiring && bAiring) {
-              return 1;
-            }
-            return a.title.localeCompare(b.title, undefined, { sensitivity: 'base', numeric: true });
-          });
-          setWatchingList(sortedCached);
+          isFreshCache = Date.now() - cachedAt < 45000;
+          setWatchingList(
+            cached.map((item) =>
+              item.userScore !== null && item.userScore !== undefined && item.userScore <= 0
+                ? { ...item, userScore: null }
+                : item
+            )
+          );
           setIsLoading(false);
         }
       } catch {
         // ignore storage read issues
       }
+    }
+
+    // Skip background GraphQL revalidation if cached watching list was fetched within the last 45s
+    if (!isRefresh && isFreshCache) {
+      return;
     }
 
     if (!hasCachedData) {
@@ -135,9 +154,9 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const isMediaInWatchingList = useCallback(
     (mediaId: number) => {
-      return watchingList.some((item) => item.mediaId === mediaId);
+      return watchingMap.has(mediaId);
     },
-    [watchingList]
+    [watchingMap]
   );
 
   // Optimistic increment progress with rollback on error - frozen reference via pendingMediaIdsRef
@@ -168,9 +187,10 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setUserStatusOverrides((prev) => ({ ...prev, [mediaId]: 'COMPLETED' }));
     }
 
-    // 1. Optimistic UI and storage update
-    setWatchingList((prevList) => {
-      const updated: NormalizedAnimeItem[] = isCompleted
+    // 1. Pure optimistic UI update; effect persists watchingList once outside updater
+    shouldPersistWatchingRef.current = true;
+    setWatchingList((prevList) =>
+      isCompleted
         ? prevList.filter((entry) => entry.mediaId !== mediaId)
         : prevList.map((entry) => {
             if (entry.mediaId === mediaId) {
@@ -182,10 +202,8 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               };
             }
             return entry;
-          });
-      storageService.setCachedWatchingList(updated).catch(() => {});
-      return updated;
-    });
+          })
+    );
 
     // Mark as pending (both in ref for 0-dep callback and in state for UI indicator)
     pendingMediaIdsRef.current.add(mediaId);
@@ -207,12 +225,12 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
       }
 
+      shouldPersistWatchingRef.current = true;
       setWatchingList((prevList) => {
-        let rolledBack: NormalizedAnimeItem[];
         if (isCompleted) {
           const exists = prevList.some((entry) => entry.mediaId === mediaId);
           if (!exists) {
-            rolledBack = [
+            return [
               {
                 ...item,
                 progress: previousProgress,
@@ -221,33 +239,29 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               },
               ...prevList
             ];
-          } else {
-            rolledBack = prevList.map((entry) =>
-              entry.mediaId === mediaId
-                ? {
-                    ...entry,
-                    progress: previousProgress,
-                    status: item.status,
-                    userStatus: item.userStatus ?? item.status
-                  }
-                : entry
-            );
           }
-        } else {
-          rolledBack = prevList.map((entry) => {
-            if (entry.mediaId === mediaId) {
-              return {
-                ...entry,
-                progress: previousProgress,
-                status: item.status,
-                userStatus: item.userStatus ?? item.status
-              };
-            }
-            return entry;
-          });
+          return prevList.map((entry) =>
+            entry.mediaId === mediaId
+              ? {
+                  ...entry,
+                  progress: previousProgress,
+                  status: item.status,
+                  userStatus: item.userStatus ?? item.status
+                }
+              : entry
+          );
         }
-        storageService.setCachedWatchingList(rolledBack).catch(() => {});
-        return rolledBack;
+        return prevList.map((entry) => {
+          if (entry.mediaId === mediaId) {
+            return {
+              ...entry,
+              progress: previousProgress,
+              status: item.status,
+              userStatus: item.userStatus ?? item.status
+            };
+          }
+          return entry;
+        });
       });
 
       const errorMsg =
@@ -277,27 +291,25 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setUserStatusOverrides((prev) => ({ ...prev, [anime.mediaId]: res.status }));
 
       if (status === 'CURRENT') {
+        const preservedProgress = res.progress ?? anime.progress ?? 0;
         const newItem: NormalizedAnimeItem = {
           ...anime,
           status: 'CURRENT',
           userStatus: 'CURRENT',
-          progress: 0
+          progress: preservedProgress
         };
 
+        shouldPersistWatchingRef.current = true;
         setWatchingList((prev) => {
           const exists = prev.some((item) => item.mediaId === anime.mediaId);
-          let updated: NormalizedAnimeItem[];
           if (exists) {
-            updated = prev.map((item) =>
+            return prev.map((item) =>
               item.mediaId === anime.mediaId
-                ? { ...item, status: 'CURRENT', userStatus: 'CURRENT' }
+                ? { ...item, status: 'CURRENT', userStatus: 'CURRENT', progress: preservedProgress }
                 : item
             );
-          } else {
-            updated = [newItem, ...prev];
           }
-          storageService.setCachedWatchingList(updated).catch(() => {});
-          return updated;
+          return [newItem, ...prev];
         });
 
         const isManga =
@@ -309,11 +321,8 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showToast(`Added "${anime.title}" to ${isManga ? 'Reading' : 'Watching'} list!`, 'success');
       } else {
         // If moved to Planning, Completed, Paused, etc., remove from watching list if it was there
-        setWatchingList((prev) => {
-          const updated = prev.filter((item) => item.mediaId !== anime.mediaId);
-          storageService.setCachedWatchingList(updated).catch(() => {});
-          return updated;
-        });
+        shouldPersistWatchingRef.current = true;
+        setWatchingList((prev) => prev.filter((item) => item.mediaId !== anime.mediaId));
 
         const isManga =
           anime.type === 'MANGA' ||

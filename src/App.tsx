@@ -1,19 +1,32 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import { useAuth } from './context/AuthContext';
 import { useAnime } from './context/AnimeContext';
-import { useUI } from './context/UIContext';
+import { useUIState, useUIActions } from './context/UIContext';
 import { ActiveTab } from './types';
-import { LoginView } from './components/auth/LoginView';
 import { HomeView } from './components/home/HomeView';
-import { SearchView } from './components/search/SearchView';
-import { ProfileView } from './components/profile/ProfileView';
 import { BottomNavigation } from './components/layout/BottomNavigation';
 import { ToastContainer } from './components/common/Toast';
 import { Skeleton } from './components/common/Skeleton';
-import { ScoreModal } from './components/common/ScoreModal';
-import { AddToListModal } from './components/common/AddToListModal';
-import { AnimeDetailModal } from './components/common/AnimeDetailModal';
 import { CelebrationOverlay } from './components/common/CelebrationOverlay';
+
+const LoginView = React.lazy(() =>
+  import('./components/auth/LoginView').then((m) => ({ default: m.LoginView }))
+);
+const SearchView = React.lazy(() =>
+  import('./components/search/SearchView').then((m) => ({ default: m.SearchView }))
+);
+const ProfileView = React.lazy(() =>
+  import('./components/profile/ProfileView').then((m) => ({ default: m.ProfileView }))
+);
+const ScoreModal = React.lazy(() =>
+  import('./components/common/ScoreModal').then((m) => ({ default: m.ScoreModal }))
+);
+const AddToListModal = React.lazy(() =>
+  import('./components/common/AddToListModal').then((m) => ({ default: m.AddToListModal }))
+);
+const AnimeDetailModal = React.lazy(() =>
+  import('./components/common/AnimeDetailModal').then((m) => ({ default: m.AnimeDetailModal }))
+);
 
 const TAB_INDEX_MAP: Record<ActiveTab, number> = {
   home: 0,
@@ -21,24 +34,99 @@ const TAB_INDEX_MAP: Record<ActiveTab, number> = {
   profile: 2
 };
 
+// Isolated toast host for unauthenticated view so UI state changes do not re-render AppContent
+const ToastHost: React.FC = React.memo(() => {
+  const { toasts } = useUIState();
+  const { dismissToast } = useUIActions();
+  return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
+});
+
+// Isolated modal & overlay host so UI state changes (toasts, modals, celebrations) never re-render AppContent or tab views
+const GlobalUIOverlays: React.FC<{ onNavigateTab: (tab: ActiveTab) => void }> = React.memo(
+  ({ onNavigateTab }) => {
+    const {
+      toasts,
+      scoreModalAnime,
+      statusModalAnime,
+      statusModalInitialStatus,
+      detailAnime,
+      detailHistory,
+      discoverGenreRequest,
+      isCelebrating,
+      celebratingTitle
+    } = useUIState();
+    const {
+      dismissToast,
+      closeScoreModal,
+      closeStatusModal,
+      closeDetailModal,
+      stopCelebration
+    } = useUIActions();
+    const { updateAnimeScore, addAnimeWithStatus, getUserStatus } = useAnime();
+
+    useEffect(() => {
+      if (discoverGenreRequest) {
+        onNavigateTab('search');
+      }
+    }, [discoverGenreRequest, onNavigateTab]);
+
+    const previousDetailTitle =
+      detailHistory.length > 0 ? detailHistory[detailHistory.length - 1].title : null;
+
+    return (
+      <>
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <CelebrationOverlay
+          isActive={isCelebrating}
+          animeTitle={celebratingTitle}
+          onComplete={stopCelebration}
+        />
+
+        {scoreModalAnime ? (
+          <Suspense fallback={null}>
+            <ScoreModal
+              anime={scoreModalAnime}
+              isOpen={true}
+              onClose={closeScoreModal}
+              onSave={updateAnimeScore}
+            />
+          </Suspense>
+        ) : null}
+
+        {statusModalAnime ? (
+          <Suspense fallback={null}>
+            <AddToListModal
+              anime={statusModalAnime}
+              isOpen={true}
+              currentStatus={getUserStatus(
+                statusModalAnime.mediaId,
+                statusModalInitialStatus ||
+                  statusModalAnime.userStatus ||
+                  (statusModalAnime.status === 'CURRENT' ? 'CURRENT' : null)
+              )}
+              onClose={closeStatusModal}
+              onSelectStatus={addAnimeWithStatus}
+            />
+          </Suspense>
+        ) : null}
+
+        {detailAnime ? (
+          <Suspense fallback={null}>
+            <AnimeDetailModal
+              anime={detailAnime}
+              isOpen={true}
+              onClose={closeDetailModal}
+              previousTitle={previousDetailTitle}
+            />
+          </Suspense>
+        ) : null}
+      </>
+    );
+  }
+);
+
 export const AppContent: React.FC = () => {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const {
-    toasts,
-    dismissToast,
-    scoreModalAnime,
-    closeScoreModal,
-    statusModalAnime,
-    statusModalInitialStatus,
-    closeStatusModal,
-    detailAnime,
-    closeDetailModal,
-    discoverGenreRequest,
-    isCelebrating,
-    celebratingTitle,
-    stopCelebration
-  } = useUI();
-  const { updateAnimeScore, addAnimeWithStatus, getUserStatus } = useAnime();
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
   const [visitedTabs, setVisitedTabs] = useState<Set<ActiveTab>>(() => new Set<ActiveTab>(['home']));
   const [transitionDirection, setTransitionDirection] = useState<'forward' | 'backward'>('forward');
@@ -51,11 +139,11 @@ export const AppContent: React.FC = () => {
       const target = e.target;
       if (!(target instanceof Element)) return;
 
-      target.classList.add('is-scrolling');
-
       const existingTimer = scrollTimers.get(target);
       if (existingTimer) {
         clearTimeout(existingTimer);
+      } else {
+        target.classList.add('is-scrolling');
       }
 
       const timer = setTimeout(() => {
@@ -86,12 +174,6 @@ export const AppContent: React.FC = () => {
     setVisitedTabs((prev) => (prev.has(newTab) ? prev : new Set(prev).add(newTab)));
   }, []);
 
-  useEffect(() => {
-    if (discoverGenreRequest) {
-      handleTabChange('search');
-    }
-  }, [discoverGenreRequest, handleTabChange]);
-
   if (authLoading) {
     return (
       <div
@@ -120,8 +202,10 @@ export const AppContent: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <>
-        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-        <LoginView />
+        <ToastHost />
+        <Suspense fallback={null}>
+          <LoginView />
+        </Suspense>
       </>
     );
   }
@@ -137,42 +221,7 @@ export const AppContent: React.FC = () => {
         position: 'relative'
       }}
     >
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-      <CelebrationOverlay
-        isActive={isCelebrating}
-        animeTitle={celebratingTitle}
-        onComplete={stopCelebration}
-      />
-
-      <ScoreModal
-        anime={scoreModalAnime}
-        isOpen={!!scoreModalAnime}
-        onClose={closeScoreModal}
-        onSave={updateAnimeScore}
-      />
-
-      <AddToListModal
-        anime={statusModalAnime}
-        isOpen={!!statusModalAnime}
-        currentStatus={
-          statusModalAnime
-            ? getUserStatus(
-                statusModalAnime.mediaId,
-                statusModalInitialStatus ||
-                  statusModalAnime.userStatus ||
-                  (statusModalAnime.status === 'CURRENT' ? 'CURRENT' : null)
-              )
-            : null
-        }
-        onClose={closeStatusModal}
-        onSelectStatus={addAnimeWithStatus}
-      />
-
-      <AnimeDetailModal
-        anime={detailAnime}
-        isOpen={!!detailAnime}
-        onClose={closeDetailModal}
-      />
+      <GlobalUIOverlays onNavigateTab={handleTabChange} />
 
       {/* Main Tab View with Slide & Fade Transition */}
       <main
@@ -223,7 +272,9 @@ export const AppContent: React.FC = () => {
               minHeight: 0
             }}
           >
-            <SearchView />
+            <Suspense fallback={null}>
+              <SearchView isActive={activeTab === 'search'} />
+            </Suspense>
           </div>
         )}
 
@@ -244,7 +295,9 @@ export const AppContent: React.FC = () => {
               minHeight: 0
             }}
           >
-            <ProfileView resetTrigger={profileResetTrigger} />
+            <Suspense fallback={null}>
+              <ProfileView resetTrigger={profileResetTrigger} />
+            </Suspense>
           </div>
         )}
       </main>

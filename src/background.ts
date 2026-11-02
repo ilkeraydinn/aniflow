@@ -23,6 +23,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // In-memory guard to prevent duplicate processing and distinguish programmatic close from user cancellation
 const processingTabs = new Set<number>();
+// Cached auth tab ID in memory: undefined = unknown (SW cold start), null = no active auth tab, number = active tab ID
+let activeAuthTabId: number | null | undefined = undefined;
 
 /**
  * Strictly validates AniList OAuth callback URLs against phishing, open-redirect,
@@ -79,6 +81,10 @@ async function fetchAndSaveUserProfile(token: string): Promise<void> {
       Viewer {
         id
         name
+        bannerImage
+        options {
+          profileColor
+        }
         avatar {
           large
           medium
@@ -136,6 +142,8 @@ async function fetchAndSaveUserProfile(token: string): Promise<void> {
     const profile = {
       id: viewer.id,
       name: viewer.name,
+      bannerImage: viewer.bannerImage ?? null,
+      profileColor: viewer.options?.profileColor ?? 'blue',
       avatar: {
         large: viewer.avatar?.large,
         medium: viewer.avatar?.medium
@@ -145,6 +153,7 @@ async function fetchAndSaveUserProfile(token: string): Promise<void> {
         completed: statusMap['COMPLETED'] ?? 0,
         planning: statusMap['PLANNING'] ?? 0,
         paused: statusMap['PAUSED'] ?? 0,
+        dropped: statusMap['DROPPED'] ?? 0,
         episodesWatched,
         minutesWatched,
         daysWatched,
@@ -179,9 +188,12 @@ async function startTabAuthFlow(clientId: string = CLIENT_ID): Promise<void> {
 
   const tab = await chrome.tabs.create({ url: authUrl });
   if (!tab || !tab.id) {
+    activeAuthTabId = null;
     await sessionStore.remove(['auth_tab_id', 'oauth_state']).catch(() => {});
     throw new Error('Could not open AniList authorization tab.');
   }
+
+  activeAuthTabId = tab.id;
 
   // Persist tab ID and expected state in session storage so it survives Service Worker dormancy
   await sessionStore.set({
@@ -192,8 +204,13 @@ async function startTabAuthFlow(clientId: string = CLIENT_ID): Promise<void> {
 
 // Top-level listener: Persists across Service Worker lifecycle suspensions
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, updatedTab) => {
-  const url = changeInfo.url || updatedTab.url;
-  if (!url) {
+  // Fast synchronous pre-filter: ignore non-URL / non-AniList updates before any storage IPC
+  if (activeAuthTabId !== undefined && activeAuthTabId !== tabId) {
+    return;
+  }
+
+  const url = changeInfo.url || (changeInfo.status === 'complete' ? updatedTab.url : undefined);
+  if (!url || !url.startsWith('https://anilist.co/')) {
     return;
   }
 
@@ -202,19 +219,21 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, updatedTab) => {
     return;
   }
 
-  const sessionStore = getSessionStore();
-  const stored = await sessionStore.get(['auth_tab_id', 'oauth_state']);
-  if (!stored || stored.auth_tab_id !== tabId) {
-    return;
-  }
-
   const authResult = isValidAniListOAuthCallback(url);
   if (!authResult.isValid) {
     return;
   }
 
+  const sessionStore = getSessionStore();
+  const stored = await sessionStore.get(['auth_tab_id', 'oauth_state']);
+  activeAuthTabId = (stored?.auth_tab_id as number | undefined) ?? null;
+  if (!stored || stored.auth_tab_id !== tabId) {
+    return;
+  }
+
   // Lock this tab to prevent re-entrancy and distinguish from user closure
   processingTabs.add(tabId);
+  activeAuthTabId = null;
 
   const expectedState = stored.oauth_state as string | undefined;
 
@@ -280,13 +299,20 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     return;
   }
 
+  if (activeAuthTabId !== undefined && activeAuthTabId !== tabId) {
+    return;
+  }
+
   const sessionStore = getSessionStore();
   const stored = await sessionStore.get(['auth_tab_id']);
   if (stored && stored.auth_tab_id === tabId) {
+    activeAuthTabId = null;
     await sessionStore.remove(['auth_tab_id', 'oauth_state']).catch(() => {});
     chrome.runtime.sendMessage({
       type: 'AUTH_ERROR',
       error: 'Authorization tab was closed before completing.'
     }).catch(() => {});
+  } else {
+    activeAuthTabId = (stored?.auth_tab_id as number | undefined) ?? null;
   }
 });

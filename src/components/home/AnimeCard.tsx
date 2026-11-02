@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { NormalizedAnimeItem } from '../../types';
 import { ProgressBar } from './ProgressBar';
-import { Plus, Check, ExternalLink, Edit2, Clock } from 'lucide-react';
+import { Plus, Check, ExternalLink, Edit2, Clock, Star } from 'lucide-react';
 import { Button } from '../common/Button';
 import { getAnimeAuraColor } from '../../utils/auraColor';
 import { anilistService } from '../../services/anilistClient';
@@ -52,6 +52,7 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
 
   const isCompleted =
     typeof item.episodes === 'number' && item.episodes > 0 && item.progress >= item.episodes;
+  const hasUserScore = typeof item.userScore === 'number' && item.userScore > 0;
 
   const handleIncrement = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -66,7 +67,7 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
       onMouseEnter={() => {
         hoverTimerRef.current = setTimeout(() => {
           anilistService.prefetchAnimeDetails(item.mediaId);
-        }, 180);
+        }, 350);
       }}
       onMouseLeave={() => {
         if (hoverTimerRef.current) {
@@ -88,32 +89,34 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
         } as React.CSSProperties
       }
     >
-      {/* Pinned Uniform External Link Button (Zero drift across all cards) */}
+      {/* Pinned Subtle External Link Icon (Frameless, zero box clutter) */}
       {item.siteUrl ? (
         <a
           href={item.siteUrl}
           target="_blank"
           rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
           aria-label={`Open ${item.title} on AniList`}
           title={`Open ${item.title} on AniList`}
-          className="card-icon-btn-subtle"
+          className="card-ext-link-plain"
           style={{
             position: 'absolute',
             top: '10px',
-            right: '12px',
-            width: '24px',
-            height: '24px',
+            right: '10px',
+            width: '22px',
+            height: '22px',
             borderRadius: '6px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: 'var(--color-tertiary)',
-            backgroundColor: 'var(--color-input-bg)',
-            border: '1px solid var(--color-border)',
+            backgroundColor: 'transparent',
+            border: 'none',
+            opacity: 0.75,
             zIndex: 2
           }}
         >
-          <ExternalLink size={12} />
+          <ExternalLink size={12.5} />
         </a>
       ) : null}
 
@@ -132,8 +135,9 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
         title={`View details for ${item.title}`}
         style={{
           width: '64px',
-          height: '92px',
           minWidth: '64px',
+          minHeight: '92px',
+          alignSelf: 'stretch',
           borderRadius: '8px',
           overflow: 'hidden',
           backgroundColor: 'var(--color-input-bg)',
@@ -153,6 +157,8 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
             loading="lazy"
             decoding="async"
             style={{
+              position: 'absolute',
+              inset: 0,
               width: '100%',
               height: '100%',
               objectFit: 'cover',
@@ -173,27 +179,28 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
         )}
       </div>
 
-      {/* Middle: Details & Progress */}
+      {/* Right Content: Metadata & Single-Row Bottom Progress Bar */}
       <div
         style={{
           flex: 1,
           minWidth: 0, // Critical to avoid horizontal overflow with ellipsis
+          minHeight: '92px',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
           gap: '8px'
         }}
       >
-        {/* Title and scores */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <div style={{ paddingRight: '28px' }}>
+        {/* Top Metadata Group: Title, Scores, Airing Info */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ paddingRight: '22px' }}>
             <h2
               className="line-clamp-2 card-title-interactive"
               title={`View details for ${item.title}`}
               onClick={() => onOpenDetail(item)}
               style={{
-                fontSize: '13px',
-                fontWeight: 500,
+                fontSize: '13.5px',
+                fontWeight: 600,
                 lineHeight: 1.25,
                 color: 'var(--color-primary)',
                 margin: 0,
@@ -204,12 +211,12 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
             </h2>
           </div>
 
-          {/* Scores hierarchy: Interactive user score vs AniList average */}
+          {/* Scores hierarchy: Interactive user score badge vs frameless AniList average */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
+              gap: '8px',
               fontSize: '11px',
               lineHeight: 1,
               flexWrap: 'wrap'
@@ -222,46 +229,62 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
                 e.stopPropagation();
                 onOpenScore?.(item);
               }}
-              title="Click to edit your score"
-              className="card-icon-btn-subtle"
+              title={hasUserScore ? `Your score: ${item.userScore!.toFixed(1)} / 10 (Click to edit)` : 'Rate this anime'}
+              className={hasUserScore ? 'user-score-badge-btn' : 'card-icon-btn-subtle'}
               style={{
+                height: '24px',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '4px',
-                background: 'var(--color-input-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '6px',
-                padding: '2px 7px',
+                gap: '4.5px',
+                background: hasUserScore ? 'var(--color-score-bg)' : 'var(--color-input-bg)',
+                border: hasUserScore ? '1px solid var(--color-score-border)' : '1px solid var(--color-border)',
+                borderRadius: '7px',
+                padding: '0 7.5px',
                 cursor: 'pointer',
-                fontSize: '11px',
+                fontSize: '11.5px',
                 lineHeight: 1,
-                color: item.userScore !== null ? 'var(--color-primary)' : 'var(--color-tertiary)'
+                color: hasUserScore ? 'var(--color-score)' : 'var(--color-secondary)',
+                fontVariantNumeric: 'tabular-nums'
               }}
             >
-              <span style={{ color: 'var(--color-secondary)', fontSize: '10px' }}>You</span>
-              <span
-                className="font-mono"
-                style={{
-                  fontWeight: 600,
-                  color: item.userScore !== null ? 'var(--color-primary)' : 'var(--color-tertiary)'
-                }}
-              >
-                {item.userScore !== null ? `★ ${item.userScore.toFixed(1)}` : 'Rate'}
-              </span>
-              <Edit2 size={10} style={{ opacity: 0.6 }} />
+              {hasUserScore ? (
+                <>
+                  <Star
+                    size={11}
+                    fill="var(--color-score-star)"
+                    color="var(--color-score-star)"
+                    style={{ flexShrink: 0 }}
+                  />
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      color: 'var(--color-score)',
+                      letterSpacing: '0.01em'
+                    }}
+                  >
+                    {item.userScore!.toFixed(1)}
+                  </span>
+                  <Edit2 size={9.5} style={{ opacity: 0.75, flexShrink: 0 }} />
+                </>
+              ) : (
+                <>
+                  <Star size={10.5} style={{ opacity: 0.65, flexShrink: 0 }} />
+                  <span style={{ fontWeight: 500, fontSize: '11px' }}>+ Rate</span>
+                </>
+              )}
             </button>
 
-            <div style={{ width: '1px', height: '10px', backgroundColor: 'var(--color-border)' }} />
+            <span style={{ color: 'var(--color-tertiary)', fontSize: '10px', userSelect: 'none' }}>•</span>
 
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', fontVariantNumeric: 'tabular-nums' }}>
               <span style={{ color: 'var(--color-secondary)' }}>AniList</span>
-              <span className="font-mono" style={{ fontWeight: 500, color: 'var(--color-primary)' }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
                 {item.averageScore !== null ? `${item.averageScore}%` : 'N/A'}
               </span>
             </div>
           </div>
 
-          {/* Next Episode Airing Countdown & Unwatched Aired Episode Indicator */}
+          {/* Next Episode Airing Countdown (Frameless Info) & Unwatched Aired Episode Badge (Highlighted Pill) */}
           {item.nextAiringEpisode ? (() => {
             const airedEpisodes = Math.max(0, item.nextAiringEpisode.episode - 1);
             const unwatchedAiredCount = Math.max(0, airedEpisodes - (item.progress || 0));
@@ -271,41 +294,39 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px',
-                  flexWrap: 'wrap'
+                  gap: '8px',
+                  flexWrap: 'wrap',
+                  marginTop: '1px'
                 }}
               >
+                {/* Frameless Informational Countdown */}
                 <div
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '5px',
-                    fontSize: '10.5px',
-                    lineHeight: 1,
-                    color: 'var(--color-primary)',
-                    backgroundColor: 'var(--color-input-bg)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '6px',
-                    padding: '3px 7px',
-                    width: 'fit-content',
-                    maxWidth: '100%',
-                    boxSizing: 'border-box'
+                    gap: '4.5px',
+                    fontSize: '11px',
+                    lineHeight: 1.2,
+                    color: 'var(--color-secondary)',
+                    maxWidth: '100%'
                   }}
                   title={`Next episode: Ep ${item.nextAiringEpisode.episode}`}
                 >
-                  <Clock size={11} style={{ color: 'var(--color-secondary)', flexShrink: 0 }} />
+                  <Clock size={11} style={{ color: 'var(--color-tertiary)', flexShrink: 0 }} />
                   <span
                     style={{
                       fontWeight: 500,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      textOverflow: 'ellipsis',
+                      fontVariantNumeric: 'tabular-nums'
                     }}
                   >
                     {formatAiringCountdown(item.nextAiringEpisode)}
                   </span>
                 </div>
 
+                {/* Highlighted Action Badge only when an episode is already out */}
                 {unwatchedAiredCount > 0 ? (
                   <div
                     style={{
@@ -318,7 +339,7 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
                       backgroundColor: 'var(--color-watching-bg)',
                       border: '1px solid color-mix(in srgb, var(--color-watching) 45%, transparent)',
                       borderRadius: '6px',
-                      padding: '3px 7px',
+                      padding: '2.5px 7px',
                       width: 'fit-content',
                       boxSizing: 'border-box'
                     }}
@@ -350,49 +371,59 @@ const AnimeCardComponent: React.FC<AnimeCardProps> = ({
           })() : null}
         </div>
 
-        {/* Progress Bar Component */}
-        <ProgressBar current={item.progress} total={item.episodes} />
-      </div>
+        {/* Single-Row Bottom Bar: Progress Bar + Episode Counter + Compact '+' Button */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            width: '100%',
+            marginTop: 'auto'
+          }}
+        >
+          <ProgressBar current={item.progress} total={item.episodes} />
 
-      {/* Right: + Action Button or Complete Check */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'center',
-          flexShrink: 0
-        }}
-      >
-        {isCompleted ? (
-          <div
-            title="Anime completed"
-            aria-label={`${item.title} is completed`}
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: 'var(--color-badge-bg)',
-              color: 'var(--color-success)',
-              border: '1px solid var(--color-border)'
-            }}
-          >
-            <Check size={18} strokeWidth={2.2} />
-          </div>
-        ) : (
-          <Button
-            variant="icon"
-            onClick={handleIncrement}
-            disabled={isPending}
-            isLoading={isPending}
-            aria-label={`Increment episode progress for ${item.title} from ${item.progress} to ${item.progress + 1}`}
-            title={`+1 Episode (${item.progress} -> ${item.progress + 1})`}
-          >
-            <Plus size={18} strokeWidth={2} />
-          </Button>
-        )}
+          {isCompleted ? (
+            <div
+              title="Anime completed"
+              aria-label={`${item.title} is completed`}
+              style={{
+                width: '28px',
+                height: '28px',
+                minWidth: '28px',
+                borderRadius: '7px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'var(--color-badge-bg)',
+                color: 'var(--color-success)',
+                border: '1px solid var(--color-border)',
+                flexShrink: 0
+              }}
+            >
+              <Check size={15} strokeWidth={2.4} />
+            </div>
+          ) : (
+            <Button
+              variant="icon"
+              onClick={handleIncrement}
+              disabled={isPending}
+              isLoading={isPending}
+              aria-label={`Increment episode progress for ${item.title} from ${item.progress} to ${item.progress + 1}`}
+              title={`+1 Episode (${item.progress} -> ${item.progress + 1})`}
+              style={{
+                width: '28px',
+                height: '28px',
+                minWidth: '28px',
+                minHeight: '28px',
+                borderRadius: '7px',
+                flexShrink: 0
+              }}
+            >
+              <Plus size={15} strokeWidth={2.2} />
+            </Button>
+          )}
+        </div>
       </div>
     </article>
   );
@@ -408,11 +439,15 @@ export const AnimeCard = React.memo(AnimeCardComponent, (prevProps, nextProps) =
     prevProps.item.progress === nextProps.item.progress &&
     prevProps.item.userScore === nextProps.item.userScore &&
     prevProps.item.userStatus === nextProps.item.userStatus &&
+    prevProps.item.averageScore === nextProps.item.averageScore &&
     prevProps.item.coverImage === nextProps.item.coverImage &&
     prevProps.item.coverImageMedium === nextProps.item.coverImageMedium &&
+    prevProps.item.coverColor === nextProps.item.coverColor &&
+    prevProps.item.siteUrl === nextProps.item.siteUrl &&
     prevProps.item.title === nextProps.item.title &&
     prevProps.item.episodes === nextProps.item.episodes &&
     prevProps.item.nextAiringEpisode?.episode === nextProps.item.nextAiringEpisode?.episode &&
+    prevProps.item.nextAiringEpisode?.airingAt === nextProps.item.nextAiringEpisode?.airingAt &&
     prevProps.item.nextAiringEpisode?.timeUntilAiring === nextProps.item.nextAiringEpisode?.timeUntilAiring
   );
 });

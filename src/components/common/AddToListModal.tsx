@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NormalizedAnimeItem, MediaListStatus } from '../../types';
-import { X, Eye, Clock, Check, PauseCircle, Loader2, BookmarkPlus, BookOpen } from 'lucide-react';
-import { Button } from './Button';
+import { X, Eye, Clock, Check, PauseCircle, XCircle, Loader2, BookmarkPlus, BookOpen } from 'lucide-react';
 
 interface AddToListModalProps {
   anime: NormalizedAnimeItem | null;
@@ -52,10 +51,18 @@ const getStatusOptions = (isManga: boolean): StatusOption[] => [
     icon: <PauseCircle size={18} strokeWidth={2.5} />,
     activeColor: 'var(--color-paused)',
     activeBg: 'var(--color-paused-bg)'
+  },
+  {
+    status: 'DROPPED',
+    label: 'Dropped',
+    description: isManga ? 'Stopped reading before finishing' : 'Stopped watching before finishing',
+    icon: <XCircle size={18} strokeWidth={2.5} />,
+    activeColor: 'var(--color-error)',
+    activeBg: 'var(--color-error-bg)'
   }
 ];
 
-export const AddToListModal: React.FC<AddToListModalProps> = ({
+const AddToListModalComponent: React.FC<AddToListModalProps> = ({
   anime,
   isOpen,
   currentStatus,
@@ -168,28 +175,26 @@ export const AddToListModal: React.FC<AddToListModalProps> = ({
             </h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
             disabled={!!savingStatus}
             aria-label="Close"
+            title="Close"
+            className="card-icon-btn-subtle"
             style={{
-              background: 'none',
-              border: 'none',
+              width: '28px',
+              height: '28px',
+              backgroundColor: 'var(--color-input-bg)',
+              border: '1px solid var(--color-border)',
               color: 'var(--color-secondary)',
               cursor: savingStatus ? 'default' : 'pointer',
-              padding: '4px',
               display: 'flex',
               alignItems: 'center',
-              borderRadius: '6px',
-              transition: 'color 0.15s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--color-primary)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--color-secondary)';
+              justifyContent: 'center',
+              borderRadius: '7px'
             }}
           >
-            <X size={16} />
+            <X size={15} />
           </button>
         </div>
 
@@ -206,8 +211,8 @@ export const AddToListModal: React.FC<AddToListModalProps> = ({
         >
           <div
             style={{
-              width: '36px',
-              height: '50px',
+              width: '40px',
+              height: '56px',
               borderRadius: '6px',
               overflow: 'hidden',
               flexShrink: 0,
@@ -224,163 +229,179 @@ export const AddToListModal: React.FC<AddToListModalProps> = ({
             <h3
               className="line-clamp-2"
               style={{
-                fontSize: '13px',
+                fontSize: '13.5px',
                 fontWeight: 600,
                 color: 'var(--color-primary)',
-                margin: '0 0 4px 0',
+                margin: '0 0 5px 0',
                 lineHeight: 1.25
               }}
             >
               {anime.title}
             </h3>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '11px',
-                color: 'var(--color-secondary)'
-              }}
-            >
-              <span>{anime.format || (isManga ? 'Manga' : 'Anime')}</span>
-              {isManga && anime.chapters ? <span>• {anime.chapters} ch</span> : anime.episodes ? <span>• {anime.episodes} eps</span> : null}
-              {anime.averageScore ? <span>• {anime.averageScore}%</span> : null}
-            </div>
+            {(() => {
+              const formatLabel = anime.format
+                ? anime.format.replace(/_/g, ' ')
+                : isManga
+                  ? 'Manga'
+                  : 'Anime';
+              const countLabel =
+                isManga && anime.chapters
+                  ? `${anime.chapters} ch`
+                  : anime.episodes
+                    ? `${anime.episodes} eps`
+                    : null;
+              const yearLabel = anime.seasonYear ? String(anime.seasonYear) : null;
+              const metaParts = [formatLabel, countLabel, yearLabel].filter(Boolean) as string[];
+
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '5.5px',
+                    fontSize: '11.5px',
+                    color: 'var(--color-secondary)',
+                    lineHeight: 1.1,
+                    fontVariantNumeric: 'tabular-nums'
+                  }}
+                >
+                  {metaParts.map((part, idx) => (
+                    <React.Fragment key={idx}>
+                      {idx > 0 ? (
+                        <span style={{ color: 'var(--color-tertiary)', fontSize: '9px', userSelect: 'none' }}>
+                          •
+                        </span>
+                      ) : null}
+                      <span style={{ fontWeight: 500 }}>{part}</span>
+                    </React.Fragment>
+                  ))}
+                  {anime.averageScore ? (
+                    <>
+                      {metaParts.length > 0 ? (
+                        <span style={{ color: 'var(--color-tertiary)', fontSize: '9px', userSelect: 'none' }}>
+                          •
+                        </span>
+                      ) : null}
+                      <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: '3.5px' }}>
+                        <span style={{ color: 'var(--color-secondary)' }}>AniList</span>
+                        <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
+                          {anime.averageScore}%
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
         {/* Options List */}
-        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--color-secondary)', fontWeight: 500 }}>
-            Select destination list:
-          </span>
+        <div style={{ padding: '14px 16px 16px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {statusOptions.map((opt) => {
+            const isSelected = effectiveCurrentStatus === opt.status;
+            const isCurrentSaving = savingStatus === opt.status;
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {statusOptions.map((opt) => {
-              const isSelected = effectiveCurrentStatus === opt.status;
-              const isCurrentSaving = savingStatus === opt.status;
-
-              return (
-                <button
-                  key={opt.status}
-                  type="button"
-                  onClick={() => handleSelect(opt.status)}
-                  disabled={!!savingStatus}
+            return (
+              <button
+                key={opt.status}
+                type="button"
+                onClick={() => handleSelect(opt.status)}
+                disabled={!!savingStatus}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '8px 12px',
+                  borderRadius: '10px',
+                  border: isSelected
+                    ? `1px solid ${opt.activeColor}`
+                    : '1px solid var(--color-border)',
+                  backgroundColor: isSelected
+                    ? opt.activeBg
+                    : 'var(--color-card)',
+                  color: 'var(--color-primary)',
+                  cursor: savingStatus ? 'default' : 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                  boxSizing: 'border-box'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected && !savingStatus) {
+                    e.currentTarget.style.borderColor = 'var(--color-border-hover)';
+                    e.currentTarget.style.backgroundColor = 'var(--color-card-subtle)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected && !savingStatus) {
+                    e.currentTarget.style.borderColor = 'var(--color-border)';
+                    e.currentTarget.style.backgroundColor = 'var(--color-card)';
+                  }
+                }}
+              >
+                <div
                   style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '12px',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: isSelected
-                      ? `1px solid ${opt.activeColor}`
-                      : '1px solid var(--color-border)',
+                    justifyContent: 'center',
                     backgroundColor: isSelected
-                      ? opt.activeBg
-                      : 'var(--color-card)',
-                    color: 'var(--color-primary)',
-                    cursor: savingStatus ? 'default' : 'pointer',
-                    textAlign: 'left',
-                    transition: 'all 0.15s ease',
-                    boxSizing: 'border-box'
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected && !savingStatus) {
-                      e.currentTarget.style.borderColor = 'var(--color-border-hover)';
-                      e.currentTarget.style.backgroundColor = 'var(--color-card-subtle)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected && !savingStatus) {
-                      e.currentTarget.style.borderColor = 'var(--color-border)';
-                      e.currentTarget.style.backgroundColor = 'var(--color-card)';
-                    }
+                      ? `color-mix(in srgb, ${opt.activeColor} 15%, var(--color-input-bg))`
+                      : 'var(--color-input-bg)',
+                    border: isSelected
+                      ? `1px solid color-mix(in srgb, ${opt.activeColor} 38%, var(--color-border))`
+                      : '1px solid var(--color-border)',
+                    color: isSelected ? opt.activeColor : 'var(--color-secondary)',
+                    opacity: isSelected ? 1 : 0.72,
+                    flexShrink: 0,
+                    transition: 'all 0.15s ease'
                   }}
                 >
-                  <div
-                    style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: 'var(--color-input-bg)',
-                      border: '1px solid var(--color-border)',
-                      color: isSelected ? opt.activeColor : 'var(--color-secondary)',
-                      flexShrink: 0
-                    }}
-                  >
-                    {isCurrentSaving ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      opt.icon
-                    )}
-                  </div>
+                  {isCurrentSaving ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    opt.icon
+                  )}
+                </div>
 
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-primary)' }}>
-                        {opt.label}
-                      </span>
-                      {isSelected ? (
-                        <span
-                          style={{
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            padding: '1px 6px',
-                            borderRadius: '4px',
-                            backgroundColor: opt.activeColor,
-                            color: 'var(--color-primary-inverse)'
-                          }}
-                        >
-                          Current
-                        </span>
-                      ) : null}
-                    </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span
                       style={{
-                        fontSize: '11px',
-                        color: 'var(--color-secondary)',
-                        display: 'block',
-                        marginTop: '2px',
-                        lineHeight: 1.2
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        color: isSelected ? opt.activeColor : 'var(--color-primary)'
                       }}
                     >
-                      {opt.description}
+                      {opt.label}
                     </span>
                   </div>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: 'var(--color-secondary)',
+                      display: 'block',
+                      marginTop: '2px',
+                      lineHeight: 1.2
+                    }}
+                  >
+                    {opt.description}
+                  </span>
+                </div>
 
-                  {isSelected ? (
-                    <Check size={16} color="var(--color-primary)" style={{ flexShrink: 0 }} />
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div
-          style={{
-            padding: '10px 16px',
-            borderTop: '1px solid var(--color-border)',
-            backgroundColor: 'var(--color-input-bg)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end'
-          }}
-        >
-          <Button
-            variant="outlined"
-            size="sm"
-            onClick={onClose}
-            disabled={!!savingStatus}
-          >
-            Cancel
-          </Button>
+                {isSelected ? (
+                  <Check size={16} strokeWidth={2.5} color={opt.activeColor} style={{ flexShrink: 0 }} />
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 };
+
+export const AddToListModal = React.memo(AddToListModalComponent);

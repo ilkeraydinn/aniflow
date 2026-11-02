@@ -34,16 +34,14 @@ export const AnimeCardSkeleton: React.FC = () => {
       }}
     >
       <Skeleton width="64px" height="92px" borderRadius="8px" />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <Skeleton width="75%" height="16px" />
+      <div style={{ flex: 1, minHeight: '92px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <Skeleton width="75%" height="15px" />
         <Skeleton width="45%" height="12px" />
-        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <Skeleton width="35%" height="11px" />
-          <Skeleton width="100%" height="6px" borderRadius="3px" />
+        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Skeleton width="100%" height="6px" borderRadius="999px" style={{ flex: 1 }} />
+          <Skeleton width="36px" height="12px" borderRadius="4px" />
+          <Skeleton width="28px" height="28px" borderRadius="7px" />
         </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-        <Skeleton width="40px" height="40px" borderRadius="8px" />
       </div>
     </div>
   );
@@ -63,15 +61,18 @@ export const AnimeGridCardSkeleton: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'flex-end',
-        padding: '12px',
+        padding: '10px',
         boxSizing: 'border-box'
       }}
     >
       <div className="skeleton-shimmer" style={{ position: 'absolute', inset: 0 }} />
-      <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <Skeleton width="85%" height="13px" borderRadius="4px" />
-        <Skeleton width="55%" height="10px" borderRadius="3px" />
-        <Skeleton width="100%" height="4px" borderRadius="2px" />
+      <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', gap: '7px' }}>
+        <Skeleton width="82%" height="13px" borderRadius="4px" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+          <Skeleton width="100%" height="4px" borderRadius="999px" style={{ flex: 1 }} />
+          <Skeleton width="28px" height="11px" borderRadius="3px" />
+          <Skeleton width="26px" height="26px" borderRadius="7px" />
+        </div>
       </div>
     </div>
   );

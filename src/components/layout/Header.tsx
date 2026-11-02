@@ -51,11 +51,11 @@ export const Header: React.FC<HeaderProps> = ({
           </h1>
           {count !== undefined ? (
             <span
-              className="font-mono"
               style={{
                 fontSize: '12px',
                 color: 'var(--color-secondary)',
-                fontWeight: 500
+                fontWeight: 500,
+                fontVariantNumeric: 'tabular-nums'
               }}
             >
               ({count})
@@ -177,21 +177,22 @@ export const Header: React.FC<HeaderProps> = ({
 
         {showRefresh ? (
           <button
+            type="button"
             onClick={() => refreshWatchingList()}
             disabled={isLoading}
             aria-label="Refresh watching list"
             title="Refresh watching list"
+            className="card-icon-btn-subtle"
             style={{
-              width: '32px',
-              height: '32px',
+              width: '30px',
+              height: '30px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: '8px',
               color: 'var(--color-secondary)',
-              backgroundColor: 'transparent',
+              backgroundColor: 'var(--color-input-bg)',
               border: '1px solid var(--color-border)',
-              transition: 'color 0.15s ease, border-color 0.15s ease, transform 0.15s ease',
               cursor: isLoading ? 'not-allowed' : 'pointer'
             }}
           >

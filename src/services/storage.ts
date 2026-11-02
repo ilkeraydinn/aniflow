@@ -1,18 +1,40 @@
-import { ThemeMode, UserProfile, NormalizedAnimeItem, AnimeDetail } from '../types';
+import { ThemeMode, ProfileSortMode, UserProfile, NormalizedAnimeItem, AnimeDetail } from '../types';
 
 const STORAGE_KEYS = {
   TOKEN: 'anilist_token',
   USER: 'anilist_user_profile',
   PROFILE_TIMESTAMP: 'anilist_profile_cached_at',
   WATCHING_LIST: 'anilist_watching_cache',
+  WATCHING_TIMESTAMP: 'anilist_watching_cached_at',
   THEME: 'anilist_theme_preference',
   IS_DEMO: 'anilist_is_demo_mode',
   VIEW_MODE: 'anilist_view_mode',
-  DETAILS_CACHE: 'anilist_details_cache_v1'
+  PROFILE_SORT: 'anilist_profile_sort',
+  LEGACY_DETAILS_CACHE: 'anilist_details_cache_v1',
+  DETAILS_LRU: 'anilist_details_lru_v2'
 } as const;
+
+const DETAIL_KEY_PREFIX = 'anilist_detail_';
+const STATUS_LIST_KEY_PREFIX = 'anilist_status_list_';
+const MAX_PERSISTED_DETAILS = 25;
+
+// Critical startup keys loaded eagerly on popup open; large lists/details load lazily on demand
+const BOOTSTRAP_KEYS: string[] = [
+  STORAGE_KEYS.TOKEN,
+  STORAGE_KEYS.USER,
+  STORAGE_KEYS.PROFILE_TIMESTAMP,
+  STORAGE_KEYS.WATCHING_LIST,
+  STORAGE_KEYS.WATCHING_TIMESTAMP,
+  STORAGE_KEYS.THEME,
+  STORAGE_KEYS.IS_DEMO,
+  STORAGE_KEYS.VIEW_MODE,
+  STORAGE_KEYS.PROFILE_SORT,
+  STORAGE_KEYS.DETAILS_LRU
+];
 
 // In-memory cache layer to eliminate asynchronous IPC round-trips for frequent reads
 const memoryStore: Record<string, unknown> = {};
+const loadedKeys = new Set<string>();
 let isStoreInitialized = false;
 let initPromise: Promise<void> | null = null;
 
@@ -21,6 +43,29 @@ const hasChromeStorage = (): boolean => {
   return typeof chrome !== 'undefined' && !!chrome.storage && !!chrome.storage.local;
 };
 
+async function getAllStorageKeys(): Promise<string[]> {
+  if (hasChromeStorage()) {
+    try {
+      if (typeof chrome.storage.local.getKeys === 'function') {
+        return await chrome.storage.local.getKeys();
+      }
+      const all = await chrome.storage.local.get(null);
+      return Object.keys(all);
+    } catch {
+      return Object.keys(memoryStore);
+    }
+  }
+  if (typeof localStorage !== 'undefined') {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k) keys.push(k);
+    }
+    return keys;
+  }
+  return Object.keys(memoryStore);
+}
+
 export async function initStorage(): Promise<void> {
   if (isStoreInitialized) return;
   if (initPromise) return initPromise;
@@ -28,27 +73,36 @@ export async function initStorage(): Promise<void> {
   initPromise = (async () => {
     try {
       if (hasChromeStorage()) {
-        const all = await chrome.storage.local.get(null);
-        Object.assign(memoryStore, all);
+        const initial = await chrome.storage.local.get(BOOTSTRAP_KEYS);
+        Object.assign(memoryStore, initial);
+        for (const key of BOOTSTRAP_KEYS) {
+          loadedKeys.add(key);
+        }
+
+        // Asynchronously clean up legacy monolithic details cache key if still present
+        chrome.storage.local.remove([STORAGE_KEYS.LEGACY_DETAILS_CACHE]).catch(() => {});
 
         // Sanitize legacy sensitive entries from localStorage if running inside extension context
         try {
           if (typeof localStorage !== 'undefined') {
             for (const key of Object.values(STORAGE_KEYS)) {
-              localStorage.removeItem(key);
+              if (key !== STORAGE_KEYS.THEME) {
+                localStorage.removeItem(key);
+              }
             }
           }
         } catch {
           // ignore cleanup errors
         }
       } else if (typeof localStorage !== 'undefined') {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k) {
+        for (const k of BOOTSTRAP_KEYS) {
+          loadedKeys.add(k);
+          const raw = localStorage.getItem(k);
+          if (raw !== null) {
             try {
-              memoryStore[k] = JSON.parse(localStorage.getItem(k) || '');
+              memoryStore[k] = JSON.parse(raw);
             } catch {
-              memoryStore[k] = localStorage.getItem(k);
+              memoryStore[k] = raw;
             }
           }
         }
@@ -64,7 +118,7 @@ export async function initStorage(): Promise<void> {
   return initPromise;
 }
 
-// Automatically start preloading storage into RAM on module load
+// Automatically start preloading critical startup keys into RAM on module load
 initStorage();
 
 // Keep in-memory cache synchronized with external changes (e.g. background worker or options)
@@ -72,6 +126,7 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local') {
       for (const [key, change] of Object.entries(changes)) {
+        loadedKeys.add(key);
         if ('newValue' in change && change.newValue !== undefined) {
           memoryStore[key] = change.newValue;
         } else {
@@ -87,18 +142,48 @@ export const storageService = {
     if (!isStoreInitialized) {
       await initStorage();
     }
-    return (memoryStore[key] as T) ?? null;
+    if (key in memoryStore) {
+      return (memoryStore[key] as T) ?? null;
+    }
+    if (!loadedKeys.has(key)) {
+      loadedKeys.add(key);
+      if (hasChromeStorage()) {
+        try {
+          const res = await chrome.storage.local.get([key]);
+          if (key in res && res[key] !== undefined) {
+            memoryStore[key] = res[key];
+            return res[key] as T;
+          }
+        } catch {
+          // ignore read error
+        }
+      } else if (typeof localStorage !== 'undefined') {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw !== null) {
+            const parsed = JSON.parse(raw) as T;
+            memoryStore[key] = parsed;
+            return parsed;
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return null;
   },
 
   getSync<T>(key: string): T | null {
     if (key in memoryStore) {
       return (memoryStore[key] as T) ?? null;
     }
-    // Only fall back to localStorage in local dev environments where chrome.storage is unavailable
-    if (!hasChromeStorage() && typeof localStorage !== 'undefined') {
+    // Fall back to localStorage for synchronous theme read or dev environments
+    if ((!hasChromeStorage() || key === STORAGE_KEYS.THEME) && typeof localStorage !== 'undefined') {
       try {
         const val = localStorage.getItem(key);
-        return val ? (JSON.parse(val) as T) : null;
+        if (val !== null) {
+          return JSON.parse(val) as T;
+        }
       } catch {
         return null;
       }
@@ -108,6 +193,7 @@ export const storageService = {
 
   async set<T>(key: string, value: T): Promise<void> {
     memoryStore[key] = value;
+    loadedKeys.add(key);
     if (hasChromeStorage()) {
       await chrome.storage.local.set({ [key]: value });
     } else if (typeof localStorage !== 'undefined') {
@@ -119,8 +205,27 @@ export const storageService = {
     }
   },
 
+  async setBatch(entries: Record<string, unknown>): Promise<void> {
+    for (const [key, value] of Object.entries(entries)) {
+      memoryStore[key] = value;
+      loadedKeys.add(key);
+    }
+    if (hasChromeStorage()) {
+      await chrome.storage.local.set(entries);
+    } else if (typeof localStorage !== 'undefined') {
+      for (const [key, value] of Object.entries(entries)) {
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch {
+          // ignore
+        }
+      }
+    }
+  },
+
   async remove(key: string): Promise<void> {
     delete memoryStore[key];
+    loadedKeys.add(key);
     if (hasChromeStorage()) {
       await chrome.storage.local.remove([key]);
     } else if (typeof localStorage !== 'undefined') {
@@ -133,8 +238,10 @@ export const storageService = {
   },
 
   async removeBatch(keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
     for (const key of keys) {
       delete memoryStore[key];
+      loadedKeys.add(key);
     }
     if (hasChromeStorage()) {
       await chrome.storage.local.remove(keys);
@@ -167,33 +274,38 @@ export const storageService = {
       await initStorage();
     }
 
-    const dynamicStatusKeys = Object.keys(memoryStore).filter((key) =>
-      key.startsWith('anilist_status_list_')
+    const allKeys = await getAllStorageKeys();
+    const dynamicKeys = allKeys.filter(
+      (key) => key.startsWith(STATUS_LIST_KEY_PREFIX) || key.startsWith(DETAIL_KEY_PREFIX)
     );
 
-    if (!hasChromeStorage() && typeof localStorage !== 'undefined') {
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith('anilist_status_list_') && !dynamicStatusKeys.includes(k)) {
-            dynamicStatusKeys.push(k);
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    // Atomic batch remove: cleans all auth, user state, and status list caches in a single IPC call
+    // Atomic batch remove: cleans all auth, user state, sharded details, and status list caches in a single IPC call
     await this.removeBatch([
       STORAGE_KEYS.TOKEN,
       STORAGE_KEYS.USER,
       STORAGE_KEYS.PROFILE_TIMESTAMP,
       STORAGE_KEYS.WATCHING_LIST,
+      STORAGE_KEYS.WATCHING_TIMESTAMP,
       STORAGE_KEYS.IS_DEMO,
-      STORAGE_KEYS.DETAILS_CACHE,
-      ...dynamicStatusKeys
+      STORAGE_KEYS.LEGACY_DETAILS_CACHE,
+      STORAGE_KEYS.DETAILS_LRU,
+      ...dynamicKeys
     ]);
+  },
+
+  async cleanupStaleUserLists(activeUserId: number): Promise<void> {
+    try {
+      const allKeys = await getAllStorageKeys();
+      const activePrefix = `${STATUS_LIST_KEY_PREFIX}${activeUserId}_`;
+      const staleKeys = allKeys.filter(
+        (key) => key.startsWith(STATUS_LIST_KEY_PREFIX) && !key.startsWith(activePrefix)
+      );
+      if (staleKeys.length > 0) {
+        await this.removeBatch(staleKeys);
+      }
+    } catch {
+      // ignore cleanup issues
+    }
   },
 
   async getTheme(): Promise<ThemeMode> {
@@ -207,6 +319,13 @@ export const storageService = {
   },
 
   async setTheme(theme: ThemeMode): Promise<void> {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.THEME, JSON.stringify(theme));
+      }
+    } catch {
+      // ignore
+    }
     return this.set<ThemeMode>(STORAGE_KEYS.THEME, theme);
   },
 
@@ -224,23 +343,41 @@ export const storageService = {
   },
 
   async setCachedProfile(profile: UserProfile): Promise<void> {
-    await this.set<UserProfile>(STORAGE_KEYS.USER, profile);
-    await this.set<number>(STORAGE_KEYS.PROFILE_TIMESTAMP, Date.now());
+    await this.setBatch({
+      [STORAGE_KEYS.USER]: profile,
+      [STORAGE_KEYS.PROFILE_TIMESTAMP]: Date.now()
+    });
+    this.cleanupStaleUserLists(profile.id).catch(() => {});
   },
 
   async getCachedWatchingList(): Promise<NormalizedAnimeItem[] | null> {
     return this.get<NormalizedAnimeItem[]>(STORAGE_KEYS.WATCHING_LIST);
   },
 
+  async getCachedWatchingListWithMeta(): Promise<{
+    list: NormalizedAnimeItem[] | null;
+    cachedAt: number;
+  }> {
+    if (!isStoreInitialized) {
+      await initStorage();
+    }
+    const list = (memoryStore[STORAGE_KEYS.WATCHING_LIST] as NormalizedAnimeItem[]) || null;
+    const cachedAt = (memoryStore[STORAGE_KEYS.WATCHING_TIMESTAMP] as number) || 0;
+    return { list, cachedAt };
+  },
+
   async setCachedWatchingList(list: NormalizedAnimeItem[]): Promise<void> {
-    return this.set<NormalizedAnimeItem[]>(STORAGE_KEYS.WATCHING_LIST, list);
+    await this.setBatch({
+      [STORAGE_KEYS.WATCHING_LIST]: list,
+      [STORAGE_KEYS.WATCHING_TIMESTAMP]: Date.now()
+    });
   },
 
   async getCachedStatusList(
     userId: number,
     status: string
   ): Promise<{ list: NormalizedAnimeItem[]; cachedAt: number } | null> {
-    const key = `anilist_status_list_${userId}_${status}`;
+    const key = `${STATUS_LIST_KEY_PREFIX}${userId}_${status}`;
     return this.get<{ list: NormalizedAnimeItem[]; cachedAt: number }>(key);
   },
 
@@ -249,40 +386,43 @@ export const storageService = {
     status: string,
     list: NormalizedAnimeItem[]
   ): Promise<void> {
-    const key = `anilist_status_list_${userId}_${status}`;
+    const key = `${STATUS_LIST_KEY_PREFIX}${userId}_${status}`;
     await this.set(key, { list, cachedAt: Date.now() });
   },
 
   getCachedAnimeDetailSync(mediaId: number): { detail: AnimeDetail; cachedAt: number } | null {
-    const map = this.getSync<Record<string, { detail: AnimeDetail; cachedAt: number }>>(
-      STORAGE_KEYS.DETAILS_CACHE
-    );
-    if (map && map[String(mediaId)]) {
-      return map[String(mediaId)];
-    }
-    return null;
+    const key = `${DETAIL_KEY_PREFIX}${mediaId}`;
+    return this.getSync<{ detail: AnimeDetail; cachedAt: number }>(key);
+  },
+
+  async getCachedAnimeDetail(mediaId: number): Promise<{ detail: AnimeDetail; cachedAt: number } | null> {
+    const key = `${DETAIL_KEY_PREFIX}${mediaId}`;
+    return this.get<{ detail: AnimeDetail; cachedAt: number }>(key);
   },
 
   async setCachedAnimeDetail(mediaId: number, detail: AnimeDetail): Promise<void> {
     try {
-      const existing =
-        this.getSync<Record<string, { detail: AnimeDetail; cachedAt: number }>>(
-          STORAGE_KEYS.DETAILS_CACHE
-        ) || {};
-      const next: Record<string, { detail: AnimeDetail; cachedAt: number }> = { ...existing };
-      const key = String(mediaId);
-      delete next[key];
-      next[key] = { detail, cachedAt: Date.now() };
+      const detailKey = `${DETAIL_KEY_PREFIX}${mediaId}`;
+      const existingLru = this.getSync<number[]>(STORAGE_KEYS.DETAILS_LRU) || [];
+      const nextLru = existingLru.filter((id) => id !== mediaId);
+      nextLru.push(mediaId);
 
-      // Keep only the 25 most recently accessed anime details to minimize memory/disk footprint
-      const keys = Object.keys(next);
-      if (keys.length > 25) {
-        const keysToRemove = keys.slice(0, keys.length - 25);
-        for (const k of keysToRemove) {
-          delete next[k];
+      const evictedIds: number[] = [];
+      while (nextLru.length > MAX_PERSISTED_DETAILS) {
+        const evicted = nextLru.shift();
+        if (evicted !== undefined) {
+          evictedIds.push(evicted);
         }
       }
-      await this.set(STORAGE_KEYS.DETAILS_CACHE, next);
+
+      if (evictedIds.length > 0) {
+        await this.removeBatch(evictedIds.map((id) => `${DETAIL_KEY_PREFIX}${id}`));
+      }
+
+      await this.setBatch({
+        [detailKey]: { detail, cachedAt: Date.now() },
+        [STORAGE_KEYS.DETAILS_LRU]: nextLru
+      });
     } catch {
       // ignore storage quota or write issues
     }
@@ -290,36 +430,40 @@ export const storageService = {
 
   async updateCachedItem(
     mediaId: number,
-    patch: Partial<NormalizedAnimeItem>
+    patch: Partial<NormalizedAnimeItem>,
+    options?: { skipWatchingList?: boolean }
   ): Promise<void> {
     try {
-      const watching = await this.getCachedWatchingList();
-      if (watching && watching.length > 0) {
-        let changed = false;
-        const updatedWatching = watching.map((item) => {
-          if (item.mediaId === mediaId) {
-            changed = true;
-            return { ...item, ...patch };
+      if (!options?.skipWatchingList) {
+        const watching = await this.getCachedWatchingList();
+        if (watching && watching.length > 0) {
+          let changed = false;
+          const updatedWatching = watching.map((item) => {
+            if (item.mediaId === mediaId) {
+              changed = true;
+              return { ...item, ...patch };
+            }
+            return item;
+          });
+          if (changed) {
+            await this.setCachedWatchingList(updatedWatching);
           }
-          return item;
-        });
-        if (changed) {
-          await this.setCachedWatchingList(updatedWatching);
         }
       }
 
-      const detailsMap = this.getSync<Record<string, { detail: AnimeDetail; cachedAt: number }>>(
-        STORAGE_KEYS.DETAILS_CACHE
-      );
-      if (detailsMap && detailsMap[String(mediaId)]) {
-        const entry = detailsMap[String(mediaId)];
-        const updatedDetail: AnimeDetail = {
-          ...entry.detail,
-          ...(patch.userScore !== undefined ? { userScore: patch.userScore } : {}),
-          ...(patch.userStatus !== undefined ? { userStatus: patch.userStatus } : {}),
-          ...(patch.progress !== undefined ? { progress: patch.progress } : {})
-        };
-        await this.setCachedAnimeDetail(mediaId, updatedDetail);
+      const lru = this.getSync<number[]>(STORAGE_KEYS.DETAILS_LRU) || [];
+      const detailKey = `${DETAIL_KEY_PREFIX}${mediaId}`;
+      if (detailKey in memoryStore || lru.includes(mediaId)) {
+        const entry = await this.getCachedAnimeDetail(mediaId);
+        if (entry?.detail) {
+          const updatedDetail: AnimeDetail = {
+            ...entry.detail,
+            ...(patch.userScore !== undefined ? { userScore: patch.userScore } : {}),
+            ...(patch.userStatus !== undefined ? { userStatus: patch.userStatus } : {}),
+            ...(patch.progress !== undefined ? { progress: patch.progress } : {})
+          };
+          await this.setCachedAnimeDetail(mediaId, updatedDetail);
+        }
       }
     } catch {
       // ignore
@@ -352,5 +496,23 @@ export const storageService = {
 
   async setViewMode(mode: 'list' | 'grid'): Promise<void> {
     return this.set<'list' | 'grid'>(STORAGE_KEYS.VIEW_MODE, mode);
+  },
+
+  async getProfileSort(): Promise<ProfileSortMode> {
+    const mode = await this.get<ProfileSortMode>(STORAGE_KEYS.PROFILE_SORT);
+    return mode === 'TITLE_ASC' || mode === 'AVERAGE_DESC' || mode === 'SCORE_DESC'
+      ? mode
+      : 'SCORE_DESC';
+  },
+
+  getProfileSortSync(): ProfileSortMode {
+    const mode = this.getSync<ProfileSortMode>(STORAGE_KEYS.PROFILE_SORT);
+    return mode === 'TITLE_ASC' || mode === 'AVERAGE_DESC' || mode === 'SCORE_DESC'
+      ? mode
+      : 'SCORE_DESC';
+  },
+
+  async setProfileSort(mode: ProfileSortMode): Promise<void> {
+    return this.set<ProfileSortMode>(STORAGE_KEYS.PROFILE_SORT, mode);
   }
 };

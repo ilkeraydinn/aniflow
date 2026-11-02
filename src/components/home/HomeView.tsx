@@ -190,6 +190,7 @@ const HomeViewComponent: React.FC<HomeViewProps> = ({ onNavigateTab }) => {
                 item={item}
                 onIncrement={incrementProgress}
                 onOpenDetail={openDetailModal}
+                onOpenScore={openScoreModal}
                 isPending={pendingMediaIds.has(item.mediaId)}
               />
             ) : (

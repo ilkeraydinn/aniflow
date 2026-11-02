@@ -30,7 +30,11 @@ const GENRES = [
   'Thriller'
 ] as const;
 
-const SearchViewComponent: React.FC = () => {
+interface SearchViewProps {
+  isActive?: boolean;
+}
+
+const SearchViewComponent: React.FC<SearchViewProps> = ({ isActive = true }) => {
   const { addAnimeToWatching, isMediaInWatchingList, getUserScore, getUserStatus } = useAnime();
   const { openScoreModal, openStatusModal, openDetailModal, showToast } = useUIActions();
   const { discoverGenreRequest } = useUIState();
@@ -63,9 +67,9 @@ const SearchViewComponent: React.FC = () => {
   ];
   const searchAbortControllerRef = useRef<AbortController | null>(null);
 
-  // Directly rotate placeholder without triggering component re-renders every 3.2s
+  // Directly rotate placeholder without triggering component re-renders every 3.2s (paused when tab hidden)
   useEffect(() => {
-    if (query) return;
+    if (!isActive || query) return;
     let idx = 0;
     const interval = setInterval(() => {
       idx = (idx + 1) % PLACEHOLDER_SUGGESTIONS.length;
@@ -74,7 +78,7 @@ const SearchViewComponent: React.FC = () => {
       }
     }, 3200);
     return () => clearInterval(interval);
-  }, [query]);
+  }, [isActive, query]);
 
   // Discover / Recommendations state
   const [discoverMode, setDiscoverMode] = useState<DiscoverMode>('TRENDING');
@@ -421,18 +425,18 @@ const SearchViewComponent: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden', position: 'relative' }}>
-      {/* Top Gradient Fade Layer (Hardware-optimized, zero backdrop-filter) */}
+      {/* Top Gradient Fade Layer (Smoothly masks scrolled cards behind the floating search dock) */}
       <div
         style={{
           position: 'absolute',
           top: 0,
           left: 0,
           right: 0,
-          height: '70px',
+          height: '80px',
           pointerEvents: 'none',
           zIndex: 30,
           background:
-            'linear-gradient(to bottom, var(--color-bg) 0%, color-mix(in srgb, var(--color-bg) 85%, transparent) 40%, transparent 100%)'
+            'linear-gradient(to bottom, var(--color-bg) 0%, var(--color-bg) 38%, color-mix(in srgb, var(--color-bg) 88%, transparent) 68%, transparent 100%)'
         }}
       />
 
@@ -611,18 +615,26 @@ const SearchViewComponent: React.FC = () => {
 
             {isLoading && results.length === 0 ? (
               <>
-                <div style={{ display: 'flex', gap: '12px', padding: '10px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
-                  <Skeleton width="52px" height="74px" borderRadius="8px" />
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '12px', padding: '10px 12px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
+                  <Skeleton width="58px" height="80px" borderRadius="8px" />
+                  <div style={{ flex: 1, minHeight: '80px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <Skeleton width="70%" height="15px" />
-                    <Skeleton width="40%" height="12px" />
+                    <Skeleton width="45%" height="11px" />
+                    <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Skeleton width="50%" height="12px" />
+                      <Skeleton width="58px" height="24px" borderRadius="8px" />
+                    </div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '12px', padding: '10px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
-                  <Skeleton width="52px" height="74px" borderRadius="8px" />
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '12px', padding: '10px 12px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
+                  <Skeleton width="58px" height="80px" borderRadius="8px" />
+                  <div style={{ flex: 1, minHeight: '80px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <Skeleton width="60%" height="15px" />
-                    <Skeleton width="35%" height="12px" />
+                    <Skeleton width="38%" height="11px" />
+                    <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Skeleton width="45%" height="12px" />
+                      <Skeleton width="58px" height="24px" borderRadius="8px" />
+                    </div>
                   </div>
                 </div>
               </>
@@ -741,19 +753,22 @@ const SearchViewComponent: React.FC = () => {
                   transition: 'opacity 0.2s ease'
                 }}
               >
-                {results.map((anime) => (
-                  <SearchResultCard
-                    key={anime.mediaId}
-                    anime={anime}
-                    isAlreadyAdded={isMediaInWatchingList(anime.mediaId)}
-                    userStatus={getUserStatus(anime.mediaId, isMediaInWatchingList(anime.mediaId) ? 'CURRENT' : anime.userStatus)}
-                    userScore={getUserScore(anime.mediaId, anime.userScore ?? null)}
-                    onOpenScoreModal={openScoreModal}
-                    onOpenStatusModal={openStatusModal}
-                    onOpenDetailModal={openDetailModal}
-                    onAdd={addAnimeToWatching}
-                  />
-                ))}
+                {results.map((anime) => {
+                  const inWatching = isMediaInWatchingList(anime.mediaId);
+                  return (
+                    <SearchResultCard
+                      key={anime.mediaId}
+                      anime={anime}
+                      isAlreadyAdded={inWatching}
+                      userStatus={getUserStatus(anime.mediaId, inWatching ? 'CURRENT' : anime.userStatus)}
+                      userScore={getUserScore(anime.mediaId, anime.userScore ?? null)}
+                      onOpenScoreModal={openScoreModal}
+                      onOpenStatusModal={openStatusModal}
+                      onOpenDetailModal={openDetailModal}
+                      onAdd={addAnimeToWatching}
+                    />
+                  );
+                })}
 
                 {/* Infinite Scroll Bottom Controls for Search */}
                 {isLoadingMore ? (
@@ -1068,13 +1083,13 @@ const SearchViewComponent: React.FC = () => {
                         fontWeight: isSelected ? 600 : 400,
                         whiteSpace: 'nowrap',
                         border: isSelected
-                          ? '1px solid var(--color-primary)'
+                          ? '1px solid color-mix(in srgb, var(--color-primary) 55%, var(--color-border))'
                           : '1px solid var(--color-border)',
                         backgroundColor: isSelected
-                          ? 'var(--color-primary)'
+                          ? 'color-mix(in srgb, var(--color-primary) 14%, var(--color-card))'
                           : 'var(--color-card)',
                         color: isSelected
-                          ? 'var(--color-primary-inverse)'
+                          ? 'var(--color-primary)'
                           : 'var(--color-secondary)',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
@@ -1166,25 +1181,37 @@ const SearchViewComponent: React.FC = () => {
             {/* Recommendations List */}
             {isDiscoverLoading && discoverList.length === 0 ? (
               <>
-                <div style={{ display: 'flex', gap: '12px', padding: '10px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
-                  <Skeleton width="52px" height="74px" borderRadius="8px" />
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '12px', padding: '10px 12px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
+                  <Skeleton width="58px" height="80px" borderRadius="8px" />
+                  <div style={{ flex: 1, minHeight: '80px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <Skeleton width="65%" height="15px" />
-                    <Skeleton width="45%" height="12px" />
+                    <Skeleton width="45%" height="11px" />
+                    <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Skeleton width="50%" height="12px" />
+                      <Skeleton width="58px" height="24px" borderRadius="8px" />
+                    </div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '12px', padding: '10px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
-                  <Skeleton width="52px" height="74px" borderRadius="8px" />
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '12px', padding: '10px 12px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
+                  <Skeleton width="58px" height="80px" borderRadius="8px" />
+                  <div style={{ flex: 1, minHeight: '80px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <Skeleton width="75%" height="15px" />
-                    <Skeleton width="40%" height="12px" />
+                    <Skeleton width="40%" height="11px" />
+                    <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Skeleton width="48%" height="12px" />
+                      <Skeleton width="58px" height="24px" borderRadius="8px" />
+                    </div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '12px', padding: '10px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
-                  <Skeleton width="52px" height="74px" borderRadius="8px" />
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '12px', padding: '10px 12px', borderRadius: '14px', backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)' }}>
+                  <Skeleton width="58px" height="80px" borderRadius="8px" />
+                  <div style={{ flex: 1, minHeight: '80px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <Skeleton width="55%" height="15px" />
-                    <Skeleton width="35%" height="12px" />
+                    <Skeleton width="35%" height="11px" />
+                    <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Skeleton width="42%" height="12px" />
+                      <Skeleton width="58px" height="24px" borderRadius="8px" />
+                    </div>
                   </div>
                 </div>
               </>
@@ -1294,19 +1321,22 @@ const SearchViewComponent: React.FC = () => {
               </div>
             ) : (
               <>
-                {discoverList.map((anime) => (
-                  <SearchResultCard
-                    key={anime.mediaId}
-                    anime={anime}
-                    isAlreadyAdded={isMediaInWatchingList(anime.mediaId)}
-                    userStatus={getUserStatus(anime.mediaId, isMediaInWatchingList(anime.mediaId) ? 'CURRENT' : anime.userStatus)}
-                    userScore={getUserScore(anime.mediaId, anime.userScore ?? null)}
-                    onOpenScoreModal={openScoreModal}
-                    onOpenStatusModal={openStatusModal}
-                    onOpenDetailModal={openDetailModal}
-                    onAdd={addAnimeToWatching}
-                  />
-                ))}
+                {discoverList.map((anime) => {
+                  const inWatching = isMediaInWatchingList(anime.mediaId);
+                  return (
+                    <SearchResultCard
+                      key={anime.mediaId}
+                      anime={anime}
+                      isAlreadyAdded={inWatching}
+                      userStatus={getUserStatus(anime.mediaId, inWatching ? 'CURRENT' : anime.userStatus)}
+                      userScore={getUserScore(anime.mediaId, anime.userScore ?? null)}
+                      onOpenScoreModal={openScoreModal}
+                      onOpenStatusModal={openStatusModal}
+                      onOpenDetailModal={openDetailModal}
+                      onAdd={addAnimeToWatching}
+                    />
+                  );
+                })}
 
                 {/* Infinite Scroll Bottom Controls for Discover */}
                 {isLoadingMore ? (

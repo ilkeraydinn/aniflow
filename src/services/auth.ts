@@ -57,7 +57,7 @@ export const authService = {
           changes: Record<string, chrome.storage.StorageChange>,
           areaName: string
         ) => {
-          if (areaName === 'local' && changes['anilist_token']?.newValue) {
+          if (areaName === 'local' && typeof changes['anilist_token']?.newValue === 'string') {
             handleToken(changes['anilist_token'].newValue);
           }
         };

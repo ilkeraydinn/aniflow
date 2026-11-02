@@ -39,11 +39,11 @@ export const ToastContainer: React.FC<ToastProps> = ({ toasts, onDismiss }) => {
               justifyContent: 'space-between',
               gap: '10px',
               padding: '10px 14px',
-              borderRadius: '8px',
+              borderRadius: '10px',
               backgroundColor: isError
-                ? 'var(--color-error-bg)'
+                ? 'color-mix(in srgb, var(--color-error) 14%, var(--color-card))'
                 : isSuccess
-                ? 'var(--color-success-bg)'
+                ? 'color-mix(in srgb, var(--color-success) 14%, var(--color-card))'
                 : 'var(--color-card)',
               color: isError
                 ? 'var(--color-error)'
@@ -52,11 +52,12 @@ export const ToastContainer: React.FC<ToastProps> = ({ toasts, onDismiss }) => {
                 : 'var(--color-primary)',
               border: `1px solid ${
                 isError
-                  ? 'var(--color-error)'
+                  ? 'color-mix(in srgb, var(--color-error) 55%, var(--color-border))'
                   : isSuccess
-                  ? 'var(--color-success)'
+                  ? 'color-mix(in srgb, var(--color-success) 55%, var(--color-border))'
                   : 'var(--color-border)'
               }`,
+              boxShadow: '0 8px 24px -4px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.2)',
               fontSize: '12px',
               fontWeight: 500,
               lineHeight: 1.35

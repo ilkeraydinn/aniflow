@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { NormalizedAnimeItem, AnimeDetail, MediaListStatus } from '../../types';
 import { anilistService } from '../../services/anilistClient';
 import { useAnime } from '../../context/AnimeContext';
-import { useUIActions, useUIState } from '../../context/UIContext';
-import { Badge } from './Badge';
+import { useUIActions } from '../../context/UIContext';
 import { Button } from './Button';
 import { Skeleton } from './Skeleton';
 import { formatAiringCountdown } from '../home/AnimeCard';
+import { ProgressBar } from '../home/ProgressBar';
 import {
   ArrowLeft,
   X,
@@ -16,15 +16,46 @@ import {
   Clock,
   Eye,
   PauseCircle,
+  XCircle,
   Plus,
   Edit2,
   Sparkles,
   Layers,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   BookOpen,
   ZoomIn,
   Users
 } from 'lucide-react';
+
+function formatMediaStatus(status?: string | null, hasNextAiring?: boolean): string {
+  if (!status) return hasNextAiring ? 'Airing' : 'N/A';
+  switch (status) {
+    case 'RELEASING':
+      return 'Airing';
+    case 'FINISHED':
+      return 'Finished';
+    case 'NOT_YET_RELEASED':
+      return 'Upcoming';
+    case 'CANCELLED':
+      return 'Cancelled';
+    case 'HIATUS':
+      return 'On Hiatus';
+    default:
+      return hasNextAiring ? 'Airing' : status.charAt(0).toUpperCase() + status.slice(1).toLowerCase().replace(/_/g, ' ');
+  }
+}
+
+function formatSeasonLabel(season?: string | null, year?: number | null): string {
+  const formattedSeason = season
+    ? season.charAt(0).toUpperCase() + season.slice(1).toLowerCase()
+    : null;
+  if (formattedSeason && year) return `${formattedSeason} ${year}`;
+  if (year) return `${year}`;
+  if (formattedSeason) return formattedSeason;
+  return 'TBA';
+}
 
 function formatCharacterRole(role: string): string {
   switch (role) {
@@ -68,12 +99,14 @@ interface AnimeDetailModalProps {
   anime: NormalizedAnimeItem | null;
   isOpen: boolean;
   onClose: () => void;
+  previousTitle?: string | null;
 }
 
-export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
+const AnimeDetailModalComponent: React.FC<AnimeDetailModalProps> = ({
   anime,
   isOpen,
-  onClose
+  onClose,
+  previousTitle
 }) => {
   const {
     openStatusModal,
@@ -82,7 +115,6 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
     goBackDetailModal,
     navigateToGenre
   } = useUIActions();
-  const { detailHistory } = useUIState();
   const {
     watchingList,
     getUserScore,
@@ -102,6 +134,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
   const [isImageZoomed, setIsImageZoomed] = useState<boolean>(false);
   const [isClosingZoom, setIsClosingZoom] = useState<boolean>(false);
   const [isCoverHovered, setIsCoverHovered] = useState<boolean>(false);
+  const [isScrolled, setIsScrolled] = useState<boolean>(false);
 
   const handleCloseZoom = useCallback(() => {
     if (isClosingZoom) return;
@@ -113,12 +146,12 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
   }, [isClosingZoom]);
 
   const handleBack = useCallback(() => {
-    if (detailHistory.length > 0) {
+    if (previousTitle) {
       goBackDetailModal();
     } else {
       onClose();
     }
-  }, [detailHistory.length, goBackDetailModal, onClose]);
+  }, [previousTitle, goBackDetailModal, onClose]);
 
   // Close on ESC (closes zoomed image first if open, else goes back in history or closes modal)
   useEffect(() => {
@@ -141,6 +174,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
     setIsImageZoomed(false);
     setIsClosingZoom(false);
     setIsCoverHovered(false);
+    setIsScrolled(false);
   }, [anime?.mediaId, isOpen]);
 
   // Fetch rich anime/manga details when opened or when media changes
@@ -151,12 +185,14 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
       setError(null);
       setIsDescExpanded(false);
       setImgError(false);
+      setIsScrolled(false);
       return;
     }
 
     if (contentScrollRef.current) {
       contentScrollRef.current.scrollTop = 0;
     }
+    setIsScrolled(false);
     setError(null);
     setImgError(false);
     setIsDescExpanded(false);
@@ -165,6 +201,8 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
     if (cached) {
       setDetail(cached);
       setIsLoading(false);
+      // Persist to disk if it was only prefetched in RAM
+      anilistService.getAnimeDetails(anime.mediaId).catch(() => {});
       return;
     }
 
@@ -261,112 +299,133 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
         animation: 'fadeIn 0.15s ease-out'
       }}
     >
-      {/* Top Navigation Bar */}
-      <header
-        style={{
+      {/* Top Navigation Bar (Floats transparently over banner at top; turns solid on scroll) */}
+      {(() => {
+        const hasBanner = Boolean(detail?.bannerImage);
+        const isTransparentHeader = hasBanner && !isScrolled;
+        const headerBtnClass = isTransparentHeader
+          ? 'banner-glass-btn'
+          : 'card-icon-btn-subtle';
+        const headerBtnStyle: React.CSSProperties = {
+          width: '30px',
+          height: '30px',
+          borderRadius: isTransparentHeader ? '999px' : '8px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '10px 16px',
-          borderBottom: '1px solid var(--color-border)',
-          backgroundColor: 'var(--color-card)',
-          zIndex: 10,
-          flexShrink: 0
-        }}
-      >
-        <button
-          type="button"
-          onClick={handleBack}
-          aria-label="Back"
-          title={
-            detailHistory.length > 0
-              ? `Back to ${detailHistory[detailHistory.length - 1].title}`
-              : 'Close details'
-          }
-          className="card-icon-btn-subtle"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '5px 10px',
-            borderRadius: '8px',
-            backgroundColor: 'var(--color-input-bg)',
-            border: '1px solid var(--color-border)',
-            color: 'var(--color-primary)',
-            fontSize: '12px',
-            fontWeight: 500,
-            cursor: 'pointer'
-          }}
-        >
-          <ArrowLeft size={14} />
-          <span>Back</span>
-        </button>
+          justifyContent: 'center',
+          backgroundColor: isTransparentHeader
+            ? 'rgba(0, 0, 0, 0.24)'
+            : 'var(--color-input-bg)',
+          backdropFilter: isTransparentHeader
+            ? 'blur(12px) saturate(180%)'
+            : undefined,
+          WebkitBackdropFilter: isTransparentHeader
+            ? 'blur(12px) saturate(180%)'
+            : undefined,
+          border: isTransparentHeader
+            ? '1px solid rgba(255, 255, 255, 0.24)'
+            : '1px solid var(--color-border)',
+          boxShadow: isTransparentHeader
+            ? '0 4px 12px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
+            : 'none',
+          color: isTransparentHeader ? '#ffffff' : 'var(--color-primary)',
+          cursor: 'pointer'
+        };
 
-        <span
-          className="line-clamp-1"
-          style={{
-            flex: 1,
-            fontSize: '12px',
-            fontWeight: 600,
-            color: 'var(--color-secondary)',
-            textAlign: 'center',
-            padding: '0 12px'
-          }}
-        >
-          {displayTitle}
-        </span>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {(detail?.siteUrl || anime.siteUrl) ? (
-            <a
-              href={detail?.siteUrl || anime.siteUrl}
-              target="_blank"
-              rel="noreferrer"
-              title="Open on AniList"
-              aria-label="Open on AniList"
-              className="card-icon-btn-subtle"
-              style={{
-                width: '28px',
-                height: '28px',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'var(--color-input-bg)',
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-primary)'
-              }}
-            >
-              <ExternalLink size={14} />
-            </a>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="card-icon-btn-subtle"
+        return (
+          <header
             style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '8px',
+              position: hasBanner ? 'absolute' : 'relative',
+              top: 0,
+              left: 0,
+              right: 0,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: 'var(--color-input-bg)',
-              border: '1px solid var(--color-border)',
-              color: 'var(--color-primary)',
-              cursor: 'pointer'
+              justifyContent: 'space-between',
+              padding: '10px 16px',
+              borderBottom: isTransparentHeader
+                ? 'none'
+                : '1px solid var(--color-border)',
+              backgroundColor: isTransparentHeader
+                ? 'transparent'
+                : 'var(--color-card)',
+              zIndex: 20,
+              flexShrink: 0,
+              transition: 'background-color 0.2s ease'
             }}
           >
-            <X size={15} />
-          </button>
-        </div>
-      </header>
+            <button
+              type="button"
+              onClick={handleBack}
+              aria-label="Back"
+              title={
+                previousTitle
+                  ? `Back to ${previousTitle}`
+                  : 'Back'
+              }
+              className={headerBtnClass}
+              style={headerBtnStyle}
+            >
+              <ArrowLeft size={15} />
+            </button>
+
+            <span
+              className="line-clamp-1"
+              style={{
+                flex: 1,
+                fontSize: '12px',
+                fontWeight: 600,
+                color: 'var(--color-secondary)',
+                textAlign: 'center',
+                padding: '0 12px',
+                opacity: isTransparentHeader ? 0 : 1,
+                transform: isTransparentHeader ? 'translateY(4px)' : 'translateY(0)',
+                pointerEvents: isTransparentHeader ? 'none' : 'auto',
+                transition: 'opacity 0.2s ease, transform 0.2s ease'
+              }}
+            >
+              {displayTitle}
+            </span>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {(detail?.siteUrl || anime.siteUrl) ? (
+                <a
+                  href={detail?.siteUrl || anime.siteUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open on AniList"
+                  aria-label="Open on AniList"
+                  className={headerBtnClass}
+                  style={headerBtnStyle}
+                >
+                  <ExternalLink size={14} />
+                </a>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                title="Close"
+                className={headerBtnClass}
+                style={headerBtnStyle}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </header>
+        );
+      })()}
 
       {/* Scrollable Content Body */}
       <div
         ref={contentScrollRef}
+        onScroll={(e) => {
+          const scrolledPastBanner = e.currentTarget.scrollTop > 85;
+          if (scrolledPastBanner !== isScrolled) {
+            setIsScrolled(scrolledPastBanner);
+          }
+        }}
         style={{
           flex: 1,
           minHeight: 0,
@@ -376,12 +435,12 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
           flexDirection: 'column'
         }}
       >
-        {/* Optional Banner Image */}
+        {/* Optional Full-Bleed Banner Image */}
         {detail?.bannerImage ? (
           <div
             style={{
               width: '100%',
-              height: '90px',
+              height: '185px',
               position: 'relative',
               overflow: 'hidden',
               flexShrink: 0
@@ -395,6 +454,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
+                objectPosition: 'center 25%',
                 display: 'block'
               }}
             />
@@ -403,7 +463,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                 position: 'absolute',
                 inset: 0,
                 background:
-                  'linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, var(--color-bg) 100%)'
+                  'linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.02) 32%, rgba(0,0,0,0.08) 55%, color-mix(in srgb, var(--color-bg) 78%, transparent) 82%, var(--color-bg) 100%)'
               }}
             />
           </div>
@@ -413,7 +473,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
         <div
           style={{
             padding: detail?.bannerImage ? '0 16px 16px 16px' : '16px',
-            marginTop: detail?.bannerImage ? '-36px' : '0',
+            marginTop: detail?.bannerImage ? '-48px' : '0',
             position: 'relative',
             zIndex: 2,
             display: 'flex',
@@ -541,36 +601,135 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
               </span>
             ) : null}
 
-            {/* Quick Metadata Badges */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-              {(detail?.format || anime.format) ? (
-                <Badge variant="outline">{detail?.format || anime.format}</Badge>
-              ) : null}
+            {/* Quick Metadata Inline Row */}
+            {(() => {
+              const rawFormat = detail?.format || anime.format;
+              const formatLabel = rawFormat ? rawFormat.replace(/_/g, ' ') : null;
+              const episodesCount = !isManga ? (detail?.episodes || anime.episodes) : null;
+              const chaptersCount = isManga ? (detail?.chapters || anime.chapters) : null;
+              const durationMins = !isManga ? detail?.duration : null;
+              const scoreValue = detail?.averageScore || anime.averageScore;
+              const coverAccent = detail?.coverColor || anime.coverColor;
 
-              {!isManga && (detail?.episodes || anime.episodes) ? (
-                <Badge variant="outline">{detail?.episodes || anime.episodes} eps</Badge>
-              ) : null}
+              const inlineItems: React.ReactNode[] = [];
 
-              {isManga && (detail?.chapters || anime.chapters) ? (
-                <Badge variant="outline">{detail?.chapters || anime.chapters} ch</Badge>
-              ) : null}
-
-              {!isManga && detail?.duration ? (
-                <Badge variant="outline">{detail.duration}m/ep</Badge>
-              ) : null}
-
-              {(detail?.averageScore || anime.averageScore) ? (
-                <Badge variant="neutral">
-                  <span className="font-mono">
-                    ★ {detail?.averageScore || anime.averageScore}%
+              if (episodesCount) {
+                inlineItems.push(
+                  <span key="eps" style={{ whiteSpace: 'nowrap' }}>
+                    <strong style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
+                      {episodesCount}
+                    </strong>{' '}
+                    {episodesCount === 1 ? 'ep' : 'eps'}
                   </span>
-                </Badge>
-              ) : null}
-            </div>
+                );
+              }
+
+              if (chaptersCount) {
+                inlineItems.push(
+                  <span key="ch" style={{ whiteSpace: 'nowrap' }}>
+                    <strong style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
+                      {chaptersCount}
+                    </strong>{' '}
+                    ch
+                  </span>
+                );
+              }
+
+              if (durationMins) {
+                inlineItems.push(
+                  <span key="dur" style={{ whiteSpace: 'nowrap' }}>
+                    {durationMins}m/ep
+                  </span>
+                );
+              }
+
+              if (scoreValue) {
+                inlineItems.push(
+                  <span
+                    key="score"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'baseline',
+                      gap: '4px',
+                      whiteSpace: 'nowrap',
+                      fontVariantNumeric: 'tabular-nums'
+                    }}
+                  >
+                    <span style={{ color: 'var(--color-secondary)' }}>AniList</span>
+                    <strong style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
+                      {scoreValue}%
+                    </strong>
+                  </span>
+                );
+              }
+
+              if (!formatLabel && inlineItems.length === 0) return null;
+
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '7px',
+                    flexWrap: 'wrap',
+                    marginTop: '1px',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    color: 'var(--color-secondary)',
+                    fontVariantNumeric: 'tabular-nums'
+                  }}
+                >
+                  {formatLabel ? (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '2px 7px',
+                        borderRadius: '5px',
+                        fontSize: '10.5px',
+                        fontWeight: 700,
+                        lineHeight: 1.25,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                        backgroundColor: coverAccent
+                          ? `color-mix(in srgb, ${coverAccent} 16%, var(--color-card))`
+                          : 'var(--color-badge-bg)',
+                        color: 'var(--color-primary)',
+                        border: coverAccent
+                          ? `1px solid color-mix(in srgb, ${coverAccent} 38%, var(--color-border))`
+                          : '1px solid var(--color-border)',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {formatLabel}
+                    </span>
+                  ) : null}
+
+                  {inlineItems.map((item, idx) => (
+                    <React.Fragment key={idx}>
+                      {idx > 0 || formatLabel ? (
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            color: 'var(--color-tertiary)',
+                            opacity: 0.65,
+                            fontSize: '10px',
+                            userSelect: 'none'
+                          }}
+                        >
+                          •
+                        </span>
+                      ) : null}
+                      {item}
+                    </React.Fragment>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
-        {/* Quick Action Bar (Status, Score, Progress) */}
+        {/* Quick Action Bar (Status, Score, Progress, Airing) */}
         <div
           style={{
             margin: '0 16px 14px 16px',
@@ -619,6 +778,8 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                     ? 'var(--color-watching-bg)'
                     : effectiveStatus === 'PAUSED'
                     ? 'var(--color-paused-bg)'
+                    : effectiveStatus === 'DROPPED'
+                    ? 'var(--color-error-bg)'
                     : 'var(--color-input-bg)',
                 color:
                   effectiveStatus === 'COMPLETED'
@@ -629,16 +790,20 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                     ? 'var(--color-watching)'
                     : effectiveStatus === 'PAUSED'
                     ? 'var(--color-paused)'
+                    : effectiveStatus === 'DROPPED'
+                    ? 'var(--color-error)'
                     : 'var(--color-primary)',
                 border:
                   effectiveStatus === 'COMPLETED'
-                    ? '1px solid var(--color-success)'
+                    ? '1px solid color-mix(in srgb, var(--color-success) 55%, transparent)'
                     : effectiveStatus === 'PLANNING'
-                    ? '1px solid var(--color-planning)'
+                    ? '1px solid color-mix(in srgb, var(--color-planning) 55%, transparent)'
                     : effectiveStatus === 'CURRENT'
-                    ? '1px solid var(--color-watching)'
+                    ? '1px solid color-mix(in srgb, var(--color-watching) 55%, transparent)'
                     : effectiveStatus === 'PAUSED'
-                    ? '1px solid var(--color-paused)'
+                    ? '1px solid color-mix(in srgb, var(--color-paused) 55%, transparent)'
+                    : effectiveStatus === 'DROPPED'
+                    ? '1px solid color-mix(in srgb, var(--color-error) 55%, transparent)'
                     : '1px solid var(--color-border)',
                 fontSize: '12px',
                 fontWeight: 600,
@@ -670,6 +835,11 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                   <PauseCircle size={13} strokeWidth={2.5} />
                   <span>Paused</span>
                 </>
+              ) : effectiveStatus === 'DROPPED' ? (
+                <>
+                  <XCircle size={13} strokeWidth={2.5} />
+                  <span>Dropped</span>
+                </>
               ) : (
                 <>
                   <Plus size={13} />
@@ -690,95 +860,203 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                   userScore: effectiveScore ?? anime.userScore
                 })
               }
-              title={isManga ? 'Click to rate this manga' : 'Click to rate this anime'}
+              title={
+                effectiveScore && effectiveScore > 0
+                  ? `Your score: ${effectiveScore.toFixed(1)} / 10 (Click to edit)`
+                  : isManga
+                  ? 'Click to rate this manga'
+                  : 'Click to rate this anime'
+              }
+              className={effectiveScore && effectiveScore > 0 ? 'user-score-badge-btn' : 'card-icon-btn-subtle'}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '5px',
+                gap: '5.5px',
                 padding: '7px 12px',
                 borderRadius: '8px',
-                backgroundColor: effectiveScore ? 'var(--color-primary)' : 'var(--color-input-bg)',
-                color: effectiveScore ? 'var(--color-primary-inverse)' : 'var(--color-primary)',
-                border: effectiveScore ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
+                backgroundColor:
+                  effectiveScore && effectiveScore > 0 ? 'var(--color-score-bg)' : 'var(--color-input-bg)',
+                color:
+                  effectiveScore && effectiveScore > 0 ? 'var(--color-score)' : 'var(--color-secondary)',
+                border:
+                  effectiveScore && effectiveScore > 0
+                    ? '1px solid var(--color-score-border)'
+                    : '1px solid var(--color-border)',
                 fontSize: '12px',
-                fontWeight: 600,
+                fontWeight: effectiveScore && effectiveScore > 0 ? 700 : 600,
+                fontVariantNumeric: 'tabular-nums',
                 cursor: 'pointer',
                 transition: 'all 0.15s ease'
               }}
             >
-              <Star size={13} fill={effectiveScore ? 'currentColor' : 'none'} />
-              <span>{effectiveScore ? `${effectiveScore.toFixed(1)}` : 'Rate'}</span>
-              <Edit2 size={10} style={{ opacity: 0.7 }} />
+              <Star
+                size={13}
+                fill={effectiveScore && effectiveScore > 0 ? 'var(--color-score-star)' : 'none'}
+                color={effectiveScore && effectiveScore > 0 ? 'var(--color-score-star)' : 'currentColor'}
+              />
+              <span>
+                {effectiveScore && effectiveScore > 0 ? `${effectiveScore.toFixed(1)}` : '+ Rate'}
+              </span>
+              {effectiveScore && effectiveScore > 0 ? (
+                <Edit2 size={10} style={{ opacity: 0.75 }} />
+              ) : null}
             </button>
           </div>
 
-          {/* Progress (If watching/reading) */}
-          {effectiveStatus === 'CURRENT' ? (
+          {/* Visual Single-Row Progress Bar + Compact '+' Button (Shown for Watching, Paused, and Dropped) */}
+          {effectiveStatus === 'CURRENT' ||
+          effectiveStatus === 'PAUSED' ||
+          effectiveStatus === 'DROPPED' ? (
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingTop: '8px',
-                borderTop: '1px solid var(--color-border)',
-                fontSize: '12px'
+                gap: '10px',
+                paddingTop: '10px',
+                borderTop: '1px solid var(--color-border)'
               }}
             >
-              <span style={{ color: 'var(--color-secondary)' }}>
-                Progress:{' '}
-                <strong style={{ color: 'var(--color-primary)' }}>
-                  {currentProgress} / {totalUnits ?? '?'}
-                </strong>{' '}
-                {isManga ? 'chapters' : 'episodes'}
-              </span>
+              <ProgressBar
+                current={currentProgress}
+                total={totalUnits}
+                status={effectiveStatus}
+              />
 
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setDetail((prev) =>
-                    prev ? { ...prev, progress: currentProgress + 1 } : null
-                  );
-                  incrementProgress({
-                    ...anime,
-                    progress: currentProgress
-                  });
+              {effectiveStatus === 'CURRENT' ? (
+                isCompleted ? (
+                  <div
+                    title={isManga ? 'Manga completed' : 'Anime completed'}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      minWidth: '28px',
+                      borderRadius: '7px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: 'var(--color-badge-bg)',
+                      color: 'var(--color-success)',
+                      border: '1px solid var(--color-border)',
+                      flexShrink: 0
+                    }}
+                  >
+                    <Check size={15} strokeWidth={2.4} />
+                  </div>
+                ) : (
+                  <Button
+                    variant="icon"
+                    onClick={() => {
+                      setDetail((prev) =>
+                        prev ? { ...prev, progress: currentProgress + 1 } : null
+                      );
+                      incrementProgress({
+                        ...anime,
+                        progress: currentProgress
+                      });
+                    }}
+                    disabled={isPending}
+                    isLoading={isPending}
+                    title={`${isManga ? '+1 Chapter' : '+1 Episode'} (${currentProgress} -> ${currentProgress + 1})`}
+                    aria-label={`Increment progress from ${currentProgress} to ${currentProgress + 1}`}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      minWidth: '28px',
+                      minHeight: '28px',
+                      borderRadius: '7px',
+                      flexShrink: 0
+                    }}
+                  >
+                    <Plus size={15} strokeWidth={2.2} />
+                  </Button>
+                )
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Airing Countdown & Unwatched Episode Badge (Consistent with Home Tab) */}
+          {!isManga && (detail?.nextAiringEpisode || anime.nextAiringEpisode) ? (() => {
+            const airingInfo = (detail?.nextAiringEpisode || anime.nextAiringEpisode)!;
+            const airedEpisodes = Math.max(0, airingInfo.episode - 1);
+            const unwatchedAiredCount =
+              effectiveStatus === 'CURRENT'
+                ? Math.max(0, airedEpisodes - (currentProgress || 0))
+                : 0;
+
+            return (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  flexWrap: 'wrap',
+                  paddingTop: '8px',
+                  borderTop: '1px solid var(--color-border)'
                 }}
-                disabled={isCompleted || isPending}
-                isLoading={isPending}
-                style={{ padding: '4px 10px', fontSize: '11px' }}
               >
-                {isManga ? '+1 Chapter' : '+1 Episode'}
-              </Button>
-            </div>
-          ) : null}
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    fontSize: '11.5px',
+                    color: 'var(--color-secondary)',
+                    fontVariantNumeric: 'tabular-nums'
+                  }}
+                  title={`Next episode: Ep ${airingInfo.episode}`}
+                >
+                  <Clock size={12} style={{ color: 'var(--color-tertiary)', flexShrink: 0 }} />
+                  <span style={{ fontWeight: 500, color: 'var(--color-primary)' }}>
+                    {formatAiringCountdown(airingInfo)}
+                  </span>
+                </div>
 
-          {/* Airing Countdown Pill (Anime only) */}
-          {!isManga && (detail?.nextAiringEpisode || anime.nextAiringEpisode) ? (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                paddingTop: '8px',
-                borderTop: '1px solid var(--color-border)',
-                fontSize: '11.5px',
-                color: 'var(--color-primary)'
-              }}
-            >
-              <Clock size={12} style={{ color: 'var(--color-secondary)', flexShrink: 0 }} />
-              <span>
-                Next Episode:{' '}
-                <strong style={{ color: 'var(--color-primary)' }}>
-                  {formatAiringCountdown(detail?.nextAiringEpisode || anime.nextAiringEpisode!)}
-                </strong>
-              </span>
-            </div>
-          ) : null}
+                {unwatchedAiredCount > 0 ? (
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '10.5px',
+                      lineHeight: 1,
+                      color: 'var(--color-watching)',
+                      backgroundColor: 'var(--color-watching-bg)',
+                      border: '1px solid color-mix(in srgb, var(--color-watching) 45%, transparent)',
+                      borderRadius: '6px',
+                      padding: '3px 7.5px',
+                      boxSizing: 'border-box'
+                    }}
+                    title={
+                      unwatchedAiredCount === 1
+                        ? `Episode ${airedEpisodes} has already aired!`
+                        : `${unwatchedAiredCount} aired episodes are ready to watch!`
+                    }
+                  >
+                    <span
+                      style={{
+                        width: '5px',
+                        height: '5px',
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--color-watching)',
+                        boxShadow: '0 0 6px var(--color-watching)',
+                        flexShrink: 0
+                      }}
+                    />
+                    <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {unwatchedAiredCount === 1
+                        ? `Ep ${airedEpisodes} Out`
+                        : `${unwatchedAiredCount} New Eps`}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })() : null}
         </div>
 
-        {/* GENRES SECTION (User emphasis: "Önemli özellikleri göstersin yeter örneğin genres") */}
+        {/* GENRES SECTION */}
         <div style={{ padding: '0 16px 14px 16px' }}>
           <div
             style={{
@@ -840,71 +1118,143 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
           )}
         </div>
 
-        {/* Production & Information Grid */}
+        {/* Compact 3-Column Info Strip (Studio, Season, Media Status — zero redundancy) */}
         <div style={{ padding: '0 16px 14px 16px' }}>
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
               gap: '8px',
               backgroundColor: 'var(--color-card)',
-              padding: '12px',
+              padding: '10px 12px',
               borderRadius: '12px',
               border: '1px solid var(--color-border)'
             }}
           >
             {/* Studio or Format */}
-            <div>
-              <span style={{ fontSize: '10px', color: 'var(--color-tertiary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>
+            <div style={{ minWidth: 0 }}>
+              <span
+                style={{
+                  fontSize: '10px',
+                  color: 'var(--color-tertiary)',
+                  display: 'block',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  fontWeight: 600,
+                  marginBottom: '2px'
+                }}
+              >
                 {isManga ? 'Format' : 'Studio'}
               </span>
-              <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-primary)' }}>
+              <span
+                className="line-clamp-1"
+                title={
+                  isManga
+                    ? (detail?.format || anime.format || 'MANGA')
+                    : detail?.studios && detail.studios.length > 0
+                    ? detail.studios.join(', ')
+                    : undefined
+                }
+                style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-primary)' }}
+              >
                 {isManga
                   ? (detail?.format || anime.format || 'MANGA')
                   : detail?.studios && detail.studios.length > 0
                   ? detail.studios.join(', ')
                   : isLoading
                   ? 'Loading...'
-                  : 'Unknown'}
+                  : 'TBA'}
               </span>
             </div>
 
-            {/* Season & Year or Type */}
-            <div>
-              <span style={{ fontSize: '10px', color: 'var(--color-tertiary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>
-                {isManga ? 'Type' : 'Season'}
+            {/* Season & Year */}
+            <div
+              style={{
+                minWidth: 0,
+                paddingLeft: '10px',
+                borderLeft: '1px solid var(--color-border)'
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '10px',
+                  color: 'var(--color-tertiary)',
+                  display: 'block',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  fontWeight: 600,
+                  marginBottom: '2px'
+                }}
+              >
+                {isManga ? 'Year' : 'Season'}
               </span>
-              <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-primary)' }}>
-                {isManga
-                  ? 'Manga / Publishing'
-                  : detail?.season && detail?.seasonYear
-                  ? `${detail.season} ${detail.seasonYear}`
-                  : isLoading
+              <span
+                className="line-clamp-1"
+                style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-primary)' }}
+              >
+                {isLoading && !detail
                   ? 'Loading...'
-                  : 'N/A'}
+                  : isManga
+                  ? (detail?.seasonYear || anime.seasonYear || 'TBA')
+                  : formatSeasonLabel(detail?.season, detail?.seasonYear ?? anime.seasonYear)}
               </span>
             </div>
 
-            {/* Status */}
-            <div>
-              <span style={{ fontSize: '10px', color: 'var(--color-tertiary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>
+            {/* True Media Airing Status */}
+            <div
+              style={{
+                minWidth: 0,
+                paddingLeft: '10px',
+                borderLeft: '1px solid var(--color-border)'
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '10px',
+                  color: 'var(--color-tertiary)',
+                  display: 'block',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  fontWeight: 600,
+                  marginBottom: '2px'
+                }}
+              >
                 Status
               </span>
-              <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-primary)' }}>
-                {detail?.status ? detail.status.replace(/_/g, ' ') : 'N/A'}
-              </span>
-            </div>
+              {(() => {
+                const hasNextAiring = Boolean(detail?.nextAiringEpisode || anime.nextAiringEpisode);
+                const statusLabel = isLoading && !detail
+                  ? 'Loading...'
+                  : formatMediaStatus(detail?.mediaStatus, hasNextAiring);
+                const isAiring = statusLabel === 'Airing';
 
-            {/* Episodes or Chapters */}
-            <div>
-              <span style={{ fontSize: '10px', color: 'var(--color-tertiary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>
-                {isManga ? 'Chapters' : 'Episodes'}
-              </span>
-              <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-primary)' }}>
-                {isManga
-                  ? (detail?.chapters || anime.chapters) ? `${detail?.chapters || anime.chapters} ch` : 'Unknown'
-                  : (detail?.episodes || anime.episodes) ? `${detail?.episodes || anime.episodes} eps` : 'Unknown'}
-              </span>
+                return (
+                  <span
+                    className="line-clamp-1"
+                    style={{
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: isAiring ? 'var(--color-watching)' : 'var(--color-primary)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}
+                  >
+                    {isAiring ? (
+                      <span
+                        style={{
+                          width: '5px',
+                          height: '5px',
+                          borderRadius: '50%',
+                          backgroundColor: 'var(--color-watching)',
+                          flexShrink: 0
+                        }}
+                      />
+                    ) : null}
+                    <span>{statusLabel}</span>
+                  </span>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -933,38 +1283,46 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
             </div>
           ) : detail?.description ? (
             <div>
-              <p
-                style={{
-                  fontSize: '12px',
-                  lineHeight: '1.6',
-                  color: 'var(--color-secondary)',
-                  margin: 0,
-                  whiteSpace: 'pre-line',
-                  display: isDescExpanded ? 'block' : '-webkit-box',
-                  WebkitLineClamp: isDescExpanded ? undefined : 4,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: isDescExpanded ? 'visible' : 'hidden'
-                }}
-              >
-                {detail.description}
-              </p>
+              <div style={{ position: 'relative' }}>
+                <p
+                  style={{
+                    fontSize: '12px',
+                    lineHeight: '1.6',
+                    color: 'var(--color-secondary)',
+                    margin: 0,
+                    whiteSpace: 'pre-line',
+                    display: isDescExpanded ? 'block' : '-webkit-box',
+                    WebkitLineClamp: isDescExpanded ? undefined : 4,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: isDescExpanded ? 'visible' : 'hidden'
+                  }}
+                >
+                  {detail.description}
+                </p>
+              </div>
 
               {detail.description.length > 200 ? (
                 <button
                   type="button"
                   onClick={() => setIsDescExpanded(!isDescExpanded)}
+                  className="card-icon-btn-subtle"
                   style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: '6px 0 0 0',
+                    marginTop: '8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    backgroundColor: 'var(--color-card)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: '6px',
+                    padding: '4px 9px',
                     fontSize: '11px',
-                    fontWeight: 600,
+                    fontWeight: 500,
                     color: 'var(--color-primary)',
-                    cursor: 'pointer',
-                    textDecoration: 'underline'
+                    cursor: 'pointer'
                   }}
                 >
-                  {isDescExpanded ? 'Show less' : 'Read more'}
+                  <span>{isDescExpanded ? 'Show less' : 'Read more'}</span>
+                  {isDescExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 </button>
               ) : null}
             </div>
@@ -1012,10 +1370,10 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                   gap: '8px'
                 }}
               >
-                <Skeleton width="100%" height="58px" borderRadius="10px" />
-                <Skeleton width="100%" height="58px" borderRadius="10px" />
-                <Skeleton width="100%" height="58px" borderRadius="10px" />
-                <Skeleton width="100%" height="58px" borderRadius="10px" />
+                <Skeleton width="100%" height="56px" borderRadius="10px" />
+                <Skeleton width="100%" height="56px" borderRadius="10px" />
+                <Skeleton width="100%" height="56px" borderRadius="10px" />
+                <Skeleton width="100%" height="56px" borderRadius="10px" />
               </div>
             ) : detail?.characters && detail.characters.length > 0 ? (
               <div
@@ -1025,87 +1383,91 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                   gap: '8px'
                 }}
               >
-                {detail.characters.slice(0, 6).map((char) => (
-                  <div
-                    key={char.id}
-                    title={`${char.name} (${formatCharacterRole(char.role)})`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      backgroundColor: 'var(--color-card)',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: '10px',
-                      overflow: 'hidden',
-                      minWidth: 0
-                    }}
-                  >
-                    {/* Character Portrait */}
+                {detail.characters.slice(0, 6).map((char) => {
+                  const isMainRole = char.role === 'MAIN';
+                  return (
                     <div
+                      key={char.id}
+                      title={`${char.name} (${formatCharacterRole(char.role)})`}
                       style={{
-                        width: '44px',
-                        height: '58px',
-                        minWidth: '44px',
-                        overflow: 'hidden',
-                        backgroundColor: 'var(--color-input-bg)',
-                        flexShrink: 0
-                      }}
-                    >
-                      <img
-                        src={char.imageMedium || char.image}
-                        alt={char.name}
-                        loading="lazy"
-                        decoding="async"
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                          display: 'block'
-                        }}
-                      />
-                    </div>
-
-                    {/* Character Name & Role */}
-                    <div
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        height: '46px',
-                        padding: '0 8px 0 0',
                         display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between'
+                        alignItems: 'center',
+                        gap: '10px',
+                        backgroundColor: 'var(--color-card)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '10px',
+                        overflow: 'hidden',
+                        minWidth: 0
                       }}
                     >
-                      <span
-                        className="line-clamp-2"
+                      {/* Character Portrait */}
+                      <div
                         style={{
-                          fontSize: '11.5px',
-                          fontWeight: 500,
-                          color: 'var(--color-primary)',
-                          lineHeight: 1.25
+                          width: '42px',
+                          height: '56px',
+                          minWidth: '42px',
+                          overflow: 'hidden',
+                          backgroundColor: 'var(--color-input-bg)',
+                          flexShrink: 0
                         }}
                       >
-                        {char.name}
-                      </span>
-                      <span
+                        <img
+                          src={char.imageMedium || char.image}
+                          alt={char.name}
+                          loading="lazy"
+                          decoding="async"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            display: 'block'
+                          }}
+                        />
+                      </div>
+
+                      {/* Character Name & Role (Centered vertically with balanced gap) */}
+                      <div
                         style={{
-                          fontSize: '10.5px',
-                          color: 'var(--color-tertiary)',
-                          fontWeight: 400
+                          flex: 1,
+                          minWidth: 0,
+                          padding: '4px 8px 4px 0',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          gap: '3px'
                         }}
                       >
-                        {formatCharacterRole(char.role)}
-                      </span>
+                        <span
+                          className="line-clamp-1"
+                          style={{
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            color: 'var(--color-primary)',
+                            lineHeight: 1.25
+                          }}
+                        >
+                          {char.name}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: '10.5px',
+                            color: isMainRole ? 'var(--color-secondary)' : 'var(--color-tertiary)',
+                            fontWeight: isMainRole ? 500 : 400,
+                            lineHeight: 1.2
+                          }}
+                        >
+                          {formatCharacterRole(char.role)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : null}
           </div>
         ) : null}
 
-        {/* RELATIONS SECTION (User: İlgili Sezonlar / Prequel - Sequel) */}
+        {/* RELATIONS SECTION (Prequel / Sequel / Connected Series) */}
         <div style={{ padding: '0 16px 20px 16px' }}>
           <div
             style={{
@@ -1139,59 +1501,48 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
               {detail.relations.map((rel) => {
                 const isSequel = rel.relationType === 'SEQUEL';
                 const isPrequel = rel.relationType === 'PREQUEL';
+                const formatText = rel.format ? rel.format.replace(/_/g, ' ') : null;
+                const specsMeta = [formatText, rel.seasonYear].filter(Boolean).join(' • ');
+
+                const handleSelectRelation = () => {
+                  const relStatus = getUserStatus(rel.id, null);
+                  const relScore = getUserScore(rel.id, null);
+                  const isRelManga =
+                    rel.format === 'MANGA' ||
+                    rel.format === 'NOVEL' ||
+                    rel.format === 'ONE_SHOT' ||
+                    rel.type === 'MANGA';
+                  const relAnime: NormalizedAnimeItem = {
+                    mediaId: rel.id,
+                    title: rel.title,
+                    coverImage: rel.coverImage,
+                    userScore: relScore,
+                    userStatus: relStatus,
+                    averageScore: null,
+                    progress: 0,
+                    episodes: null,
+                    chapters: null,
+                    seasonYear: rel.seasonYear ?? null,
+                    type: isRelManga ? 'MANGA' : 'ANIME',
+                    status: relStatus || (rel.status as MediaListStatus) || 'PLANNING',
+                    format: rel.format || (isRelManga ? 'MANGA' : 'TV'),
+                    siteUrl: isRelManga
+                      ? `https://anilist.co/manga/${rel.id}`
+                      : `https://anilist.co/anime/${rel.id}`
+                  };
+                  openDetailModal(relAnime);
+                };
 
                 return (
                   <div
                     key={`${rel.id}_${rel.relationType}`}
                     role="button"
                     tabIndex={0}
-                    onClick={() => {
-                      const relStatus = getUserStatus(rel.id, null);
-                      const relScore = getUserScore(rel.id, null);
-                      const isRelManga = rel.format === 'MANGA' || rel.format === 'NOVEL' || rel.format === 'ONE_SHOT' || rel.type === 'MANGA';
-                      const relAnime: NormalizedAnimeItem = {
-                        mediaId: rel.id,
-                        title: rel.title,
-                        coverImage: rel.coverImage,
-                        userScore: relScore,
-                        userStatus: relStatus,
-                        averageScore: null,
-                        progress: 0,
-                        episodes: null,
-                        chapters: null,
-                        type: isRelManga ? 'MANGA' : 'ANIME',
-                        status: relStatus || (rel.status as MediaListStatus) || 'PLANNING',
-                        format: rel.format || (isRelManga ? 'MANGA' : 'TV'),
-                        siteUrl: isRelManga
-                          ? `https://anilist.co/manga/${rel.id}`
-                          : `https://anilist.co/anime/${rel.id}`
-                      };
-                      openDetailModal(relAnime);
-                    }}
+                    onClick={handleSelectRelation}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        const relStatus = getUserStatus(rel.id, null);
-                        const relScore = getUserScore(rel.id, null);
-                        const isRelManga = rel.format === 'MANGA' || rel.format === 'NOVEL' || rel.format === 'ONE_SHOT' || rel.type === 'MANGA';
-                        const relAnime: NormalizedAnimeItem = {
-                          mediaId: rel.id,
-                          title: rel.title,
-                          coverImage: rel.coverImage,
-                          userScore: relScore,
-                          userStatus: relStatus,
-                          averageScore: null,
-                          progress: 0,
-                          episodes: null,
-                          chapters: null,
-                          type: isRelManga ? 'MANGA' : 'ANIME',
-                          status: relStatus || (rel.status as MediaListStatus) || 'PLANNING',
-                          format: rel.format || (isRelManga ? 'MANGA' : 'TV'),
-                          siteUrl: isRelManga
-                            ? `https://anilist.co/manga/${rel.id}`
-                            : `https://anilist.co/anime/${rel.id}`
-                        };
-                        openDetailModal(relAnime);
+                        handleSelectRelation();
                       }
                     }}
                     style={{
@@ -1201,9 +1552,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                       padding: '8px 10px',
                       borderRadius: '10px',
                       backgroundColor: 'var(--color-card)',
-                      border: isSequel
-                        ? '1px solid var(--color-primary)'
-                        : '1px solid var(--color-border)',
+                      border: '1px solid var(--color-border)',
                       cursor: 'pointer',
                       transition: 'border-color 0.15s ease, background-color 0.15s ease, transform 0.1s ease',
                       outline: 'none'
@@ -1214,9 +1563,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = 'var(--color-card)';
-                      e.currentTarget.style.borderColor = isSequel
-                        ? 'var(--color-primary)'
-                        : 'var(--color-border)';
+                      e.currentTarget.style.borderColor = 'var(--color-border)';
                     }}
                   >
                     {/* Cover Thumbnail */}
@@ -1228,7 +1575,8 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                         borderRadius: '6px',
                         overflow: 'hidden',
                         backgroundColor: 'var(--color-input-bg)',
-                        border: '1px solid var(--color-border)'
+                        border: '1px solid var(--color-border)',
+                        flexShrink: 0
                       }}
                     >
                       <img
@@ -1247,33 +1595,43 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                         minWidth: 0,
                         display: 'flex',
                         flexDirection: 'column',
+                        justifyContent: 'center',
                         gap: '4px'
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                         <span
                           style={{
-                            fontSize: '9.5px',
+                            fontSize: '10px',
                             fontWeight: 600,
-                            letterSpacing: '0.03em',
-                            padding: '1px 6px',
-                            borderRadius: '4px',
+                            letterSpacing: '0.02em',
+                            padding: '1.5px 6.5px',
+                            borderRadius: '5px',
                             backgroundColor: isSequel
-                              ? 'var(--color-primary)'
+                              ? 'var(--color-watching-bg)'
                               : isPrequel
                               ? 'var(--color-badge-bg)'
                               : 'var(--color-input-bg)',
                             color: isSequel
-                              ? 'var(--color-primary-inverse)'
-                              : 'var(--color-primary)',
-                            border: '1px solid var(--color-border)'
+                              ? 'var(--color-watching)'
+                              : 'var(--color-secondary)',
+                            border: isSequel
+                              ? '1px solid color-mix(in srgb, var(--color-watching) 35%, transparent)'
+                              : '1px solid var(--color-border)'
                           }}
                         >
                           {formatRelationLabel(rel.relationType)}
                         </span>
-                        {rel.format ? (
-                          <span style={{ fontSize: '10px', color: 'var(--color-tertiary)' }}>
-                            {rel.format}
+                        {specsMeta ? (
+                          <span
+                            style={{
+                              fontSize: '10.5px',
+                              color: 'var(--color-tertiary)',
+                              fontWeight: 500,
+                              fontVariantNumeric: 'tabular-nums'
+                            }}
+                          >
+                            {specsMeta}
                           </span>
                         ) : null}
                       </div>
@@ -1375,3 +1733,5 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
     </div>
   );
 };
+
+export const AnimeDetailModal = React.memo(AnimeDetailModalComponent);

@@ -23,7 +23,7 @@ const getScoreLabel = (score: number): string => {
   return 'No score set';
 };
 
-export const ScoreModal: React.FC<ScoreModalProps> = ({
+const ScoreModalComponent: React.FC<ScoreModalProps> = ({
   anime,
   isOpen,
   onClose,
@@ -148,28 +148,26 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
             </h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
             disabled={isSaving}
             aria-label="Close"
+            title="Close"
+            className="card-icon-btn-subtle"
             style={{
-              background: 'none',
-              border: 'none',
+              width: '28px',
+              height: '28px',
+              backgroundColor: 'var(--color-input-bg)',
+              border: '1px solid var(--color-border)',
               color: 'var(--color-secondary)',
               cursor: isSaving ? 'default' : 'pointer',
-              padding: '4px',
               display: 'flex',
               alignItems: 'center',
-              borderRadius: '6px',
-              transition: 'color 0.15s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--color-primary)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--color-secondary)';
+              justifyContent: 'center',
+              borderRadius: '7px'
             }}
           >
-            <X size={16} />
+            <X size={15} />
           </button>
         </div>
 
@@ -186,8 +184,8 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
         >
           <div
             style={{
-              width: '36px',
-              height: '50px',
+              width: '40px',
+              height: '56px',
               borderRadius: '6px',
               overflow: 'hidden',
               flexShrink: 0,
@@ -204,20 +202,76 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
             <h3
               className="line-clamp-2"
               style={{
-                fontSize: '13px',
+                fontSize: '13.5px',
                 fontWeight: 600,
                 color: 'var(--color-primary)',
-                margin: '0 0 4px 0',
+                margin: '0 0 5px 0',
                 lineHeight: 1.25
               }}
             >
               {anime.title}
             </h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-secondary)' }}>
-              <span>{anime.format || 'Anime'}</span>
-              {anime.episodes ? <span>• {anime.episodes} eps</span> : null}
-              {anime.userStatus ? <span>• {anime.userStatus}</span> : null}
-            </div>
+            {(() => {
+              const isManga =
+                anime.type === 'MANGA' ||
+                anime.format === 'MANGA' ||
+                anime.format === 'NOVEL' ||
+                anime.format === 'ONE_SHOT';
+              const formatLabel = anime.format
+                ? anime.format.replace(/_/g, ' ')
+                : isManga
+                  ? 'Manga'
+                  : 'Anime';
+              const countLabel =
+                isManga && anime.chapters
+                  ? `${anime.chapters} ch`
+                  : anime.episodes
+                    ? `${anime.episodes} eps`
+                    : null;
+              const yearLabel = anime.seasonYear ? String(anime.seasonYear) : null;
+              const metaParts = [formatLabel, countLabel, yearLabel].filter(Boolean) as string[];
+
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '5.5px',
+                    fontSize: '11.5px',
+                    color: 'var(--color-secondary)',
+                    lineHeight: 1.1,
+                    fontVariantNumeric: 'tabular-nums'
+                  }}
+                >
+                  {metaParts.map((part, idx) => (
+                    <React.Fragment key={idx}>
+                      {idx > 0 ? (
+                        <span style={{ color: 'var(--color-tertiary)', fontSize: '9px', userSelect: 'none' }}>
+                          •
+                        </span>
+                      ) : null}
+                      <span style={{ fontWeight: 500 }}>{part}</span>
+                    </React.Fragment>
+                  ))}
+                  {anime.averageScore ? (
+                    <>
+                      {metaParts.length > 0 ? (
+                        <span style={{ color: 'var(--color-tertiary)', fontSize: '9px', userSelect: 'none' }}>
+                          •
+                        </span>
+                      ) : null}
+                      <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: '3.5px' }}>
+                        <span style={{ color: 'var(--color-secondary)' }}>AniList</span>
+                        <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
+                          {anime.averageScore}%
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -233,26 +287,24 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
               gap: '4px'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', fontVariantNumeric: 'tabular-nums' }}>
               <Star
                 size={24}
-                fill={selectedScore > 0 ? '#f59e0b' : 'none'}
-                color={selectedScore > 0 ? '#f59e0b' : 'var(--color-tertiary)'}
+                fill={selectedScore > 0 ? 'var(--color-score-star)' : 'none'}
+                color={selectedScore > 0 ? 'var(--color-score-star)' : 'var(--color-tertiary)'}
                 style={{ transform: 'translateY(1px)' }}
               />
               <span
-                className="font-mono"
                 style={{
                   fontSize: '34px',
                   fontWeight: 700,
-                  color: selectedScore > 0 ? 'var(--color-primary)' : 'var(--color-tertiary)',
+                  color: selectedScore > 0 ? 'var(--color-score)' : 'var(--color-tertiary)',
                   letterSpacing: '-0.5px'
                 }}
               >
                 {currentScoreFormatted}
               </span>
               <span
-                className="font-mono"
                 style={{
                   fontSize: '16px',
                   fontWeight: 500,
@@ -300,19 +352,19 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
                       justifyContent: 'center',
                       borderRadius: '6px',
                       fontSize: '12px',
-                      fontWeight: 600,
+                      fontWeight: isSelected ? 700 : 600,
                       cursor: isSaving ? 'default' : 'pointer',
                       border: isSelected
-                        ? '1px solid var(--color-primary)'
+                        ? '1px solid var(--color-score-border)'
                         : '1px solid var(--color-border)',
                       backgroundColor: isSelected
-                        ? 'var(--color-primary)'
+                        ? 'var(--color-score-bg)'
                         : 'var(--color-card)',
                       color: isSelected
-                        ? 'var(--color-card)'
+                        ? 'var(--color-score)'
                         : 'var(--color-primary)',
                       transition: 'all 0.1s ease',
-                      fontFamily: 'JetBrains Mono, monospace'
+                      fontVariantNumeric: 'tabular-nums'
                     }}
                   >
                     {num}
@@ -328,7 +380,7 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
               <span style={{ fontSize: '11px', color: 'var(--color-secondary)', fontWeight: 500 }}>
                 Fine Tune (Decimal Score)
               </span>
-              <span className="font-mono" style={{ fontSize: '11px', color: 'var(--color-tertiary)' }}>
+              <span style={{ fontSize: '11px', color: 'var(--color-tertiary)', fontVariantNumeric: 'tabular-nums' }}>
                 Step 0.5
               </span>
             </div>
@@ -345,10 +397,10 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
                   border: '1px solid var(--color-border)',
                   backgroundColor: 'var(--color-input-bg)',
                   color: selectedScore <= 0 ? 'var(--color-tertiary)' : 'var(--color-primary)',
-                  fontSize: '11px',
+                  fontSize: '11.5px',
                   fontWeight: 600,
                   cursor: selectedScore <= 0 || isSaving ? 'not-allowed' : 'pointer',
-                  fontFamily: 'JetBrains Mono, monospace'
+                  fontVariantNumeric: 'tabular-nums'
                 }}
               >
                 -0.5
@@ -365,7 +417,7 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
                 className="score-slider"
                 style={{
                   flex: 1,
-                  background: `linear-gradient(to right, var(--color-primary) 0%, var(--color-primary) ${(selectedScore / 10) * 100}%, var(--color-progress-bg) ${(selectedScore / 10) * 100}%, var(--color-progress-bg) 100%)`,
+                  background: `linear-gradient(to right, var(--color-score-star) 0%, var(--color-score-star) ${(selectedScore / 10) * 100}%, var(--color-progress-bg) ${(selectedScore / 10) * 100}%, var(--color-progress-bg) 100%)`,
                   cursor: isSaving ? 'default' : 'pointer'
                 }}
               />
@@ -381,10 +433,10 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
                   border: '1px solid var(--color-border)',
                   backgroundColor: 'var(--color-input-bg)',
                   color: selectedScore >= 10 ? 'var(--color-tertiary)' : 'var(--color-primary)',
-                  fontSize: '11px',
+                  fontSize: '11.5px',
                   fontWeight: 600,
                   cursor: selectedScore >= 10 || isSaving ? 'not-allowed' : 'pointer',
-                  fontFamily: 'JetBrains Mono, monospace'
+                  fontVariantNumeric: 'tabular-nums'
                 }}
               >
                 +0.5
@@ -415,23 +467,26 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '7px 10px',
+                padding: '8px 12px',
                 borderRadius: '8px',
                 border: '1px solid var(--color-border)',
                 backgroundColor: 'transparent',
-                color: 'var(--color-tertiary)',
-                fontSize: '11px',
+                color: 'var(--color-secondary)',
+                fontSize: '12px',
                 fontWeight: 500,
+                lineHeight: 1,
                 cursor: isSaving ? 'default' : 'pointer',
-                transition: 'color 0.15s, border-color 0.15s'
+                transition: 'color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.color = '#ef4444';
-                e.currentTarget.style.borderColor = '#ef4444';
+                e.currentTarget.style.color = 'var(--color-error)';
+                e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--color-error) 55%, transparent)';
+                e.currentTarget.style.backgroundColor = 'var(--color-error-bg)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.color = 'var(--color-tertiary)';
+                e.currentTarget.style.color = 'var(--color-secondary)';
                 e.currentTarget.style.borderColor = 'var(--color-border)';
+                e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
               <Trash2 size={13} />
@@ -474,3 +529,5 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
     </div>
   );
 };
+
+export const ScoreModal = React.memo(ScoreModalComponent);

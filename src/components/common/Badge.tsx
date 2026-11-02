@@ -16,8 +16,9 @@ export const Badge: React.FC<BadgeProps> = ({
   let border = '1px solid transparent';
 
   if (variant === 'accent') {
-    bg = 'var(--color-primary)';
-    color = 'var(--color-primary-inverse)';
+    bg = 'var(--color-score-bg)';
+    color = 'var(--color-score)';
+    border = '1px solid var(--color-score-border)';
   } else if (variant === 'success') {
     bg = 'var(--color-success-bg)';
     color = 'var(--color-success)';
@@ -30,19 +31,20 @@ export const Badge: React.FC<BadgeProps> = ({
 
   return (
     <span
-      className={`font-mono ${className}`}
+      className={className}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: '2px 7px',
+        padding: '2.5px 7px',
         borderRadius: '6px',
         fontSize: '11px',
-        fontWeight: 500,
+        fontWeight: variant === 'accent' ? 700 : 500,
         lineHeight: 1.2,
         backgroundColor: bg,
         color: color,
         border: border,
-        letterSpacing: '0.02em',
+        letterSpacing: '0.01em',
+        fontVariantNumeric: 'tabular-nums',
         whiteSpace: 'nowrap'
       }}
     >

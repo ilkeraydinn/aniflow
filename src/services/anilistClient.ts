@@ -9,8 +9,15 @@ import {
   SearchResponse
 } from '../types';
 import { storageService } from './storage';
-import { MOCK_USER_PROFILE, MOCK_WATCHING_LIST, MOCK_SEARCH_RESULTS } from './mockData';
 import { addTitlesToCorpus, findFuzzyCorrection } from './fuzzySearch';
+
+let mockDataPromise: Promise<typeof import('./mockData')> | null = null;
+function loadMockData(): Promise<typeof import('./mockData')> {
+  if (!mockDataPromise) {
+    mockDataPromise = import('./mockData');
+  }
+  return mockDataPromise;
+}
 
 const ANILIST_ENDPOINT = 'https://graphql.anilist.co';
 
@@ -26,6 +33,8 @@ const searchCache = new Map<string, PaginatedAnimeResult>();
 const userListCache = new Map<string, NormalizedAnimeItem[]>();
 const detailsCache = new Map<number, AnimeDetail>();
 const inFlightDetailsPromises = new Map<number, Promise<AnimeDetail>>();
+let sessionPrefetchCount = 0;
+const MAX_SESSION_PREFETCHES = 20;
 let cachedProfilePromise: Promise<UserProfile> | null = null;
 let lastProfileFetchTime = 0;
 let lastFetchedProfile: UserProfile | null = null;
@@ -46,7 +55,8 @@ function clearAllInMemoryCaches(): void {
 
 export function updateItemInCaches(
   mediaId: number,
-  patch: Partial<NormalizedAnimeItem>
+  patch: Partial<NormalizedAnimeItem>,
+  options?: { skipWatchingList?: boolean }
 ): void {
   // 1. Update in detailsCache if loaded
   if (detailsCache.has(mediaId)) {
@@ -87,7 +97,7 @@ export function updateItemInCaches(
   }
 
   // 4. Update in persistent disk cache
-  storageService.updateCachedItem(mediaId, patch).catch(() => {});
+  storageService.updateCachedItem(mediaId, patch, options).catch(() => {});
 }
 
 export function invalidateStatusListCache(status?: MediaListStatus): void {
@@ -102,8 +112,18 @@ export function invalidateStatusListCache(status?: MediaListStatus): void {
   }
 }
 
+function getBoundedCache<K, V>(map: Map<K, V>, key: K): V | undefined {
+  if (!map.has(key)) return undefined;
+  const val = map.get(key)!;
+  map.delete(key);
+  map.set(key, val);
+  return val;
+}
+
 function setBoundedCache<K, V>(map: Map<K, V>, key: K, value: V, maxEntries = MAX_CACHE_ENTRIES): void {
-  if (map.size >= maxEntries) {
+  if (map.has(key)) {
+    map.delete(key);
+  } else if (map.size >= maxEntries) {
     const firstKey = map.keys().next().value;
     if (firstKey !== undefined) {
       map.delete(firstKey);
@@ -327,6 +347,7 @@ export const anilistService = {
   async getViewerProfile(token?: string, forceRefresh = false): Promise<UserProfile> {
     const isDemo = await storageService.isDemoMode();
     if (isDemo) {
+      const { MOCK_USER_PROFILE } = await loadMockData();
       return MOCK_USER_PROFILE;
     }
 
@@ -352,7 +373,11 @@ export const anilistService = {
 
       // 3. Return disk profile if within 5-minute disk TTL (handles popup reopenings with 0ms delay)
       const diskMeta = await storageService.getCachedProfileWithMeta();
-      if (diskMeta.profile && now - diskMeta.cachedAt < DISK_PROFILE_TTL_MS) {
+      if (
+        diskMeta.profile &&
+        now - diskMeta.cachedAt < DISK_PROFILE_TTL_MS &&
+        diskMeta.profile.profileColor !== undefined
+      ) {
         lastFetchedProfile = diskMeta.profile;
         lastProfileFetchTime = diskMeta.cachedAt;
         if (effectiveToken) lastFetchedToken = effectiveToken;
@@ -366,6 +391,10 @@ export const anilistService = {
           Viewer {
             id
             name
+            bannerImage
+            options {
+              profileColor
+            }
             avatar {
               large
               medium
@@ -395,6 +424,8 @@ export const anilistService = {
           Viewer: {
             id: number;
             name: string;
+            bannerImage?: string | null;
+            options?: { profileColor?: string | null };
             avatar?: { large?: string; medium?: string };
             statistics?: {
               anime?: {
@@ -424,7 +455,8 @@ export const anilistService = {
           watching: statusMap['CURRENT'] ?? 0,
           completed: statusMap['COMPLETED'] ?? 0,
           planning: statusMap['PLANNING'] ?? 0,
-          paused: statusMap['PAUSED'] ?? 0
+          paused: statusMap['PAUSED'] ?? 0,
+          dropped: statusMap['DROPPED'] ?? 0
         };
 
         const episodesWatched = viewer.statistics?.anime?.episodesWatched ?? 0;
@@ -439,6 +471,8 @@ export const anilistService = {
         const profile: UserProfile = {
           id: viewer.id,
           name: viewer.name,
+          bannerImage: viewer.bannerImage ?? null,
+          profileColor: viewer.options?.profileColor ?? 'blue',
           avatar: {
             large: viewer.avatar?.large,
             medium: viewer.avatar?.medium
@@ -459,6 +493,7 @@ export const anilistService = {
         return profile;
       } catch (err: unknown) {
         if (err instanceof Error && err.message === 'DEMO_MODE_ACTIVE') {
+          const { MOCK_USER_PROFILE } = await loadMockData();
           return MOCK_USER_PROFILE;
         }
         const cached = await storageService.getCachedProfile();
@@ -475,6 +510,7 @@ export const anilistService = {
   async getUserWatchingList(userId: number): Promise<NormalizedAnimeItem[]> {
     const isDemo = await storageService.isDemoMode();
     if (isDemo) {
+      const { MOCK_WATCHING_LIST } = await loadMockData();
       return MOCK_WATCHING_LIST;
     }
 
@@ -482,8 +518,6 @@ export const anilistService = {
       query UserAnimeList($userId: Int) {
         MediaListCollection(userId: $userId, type: ANIME, status: CURRENT) {
           lists {
-            name
-            status
             entries {
               id
               mediaId
@@ -498,7 +532,6 @@ export const anilistService = {
                   userPreferred
                 }
                 coverImage {
-                  extraLarge
                   large
                   medium
                   color
@@ -507,7 +540,7 @@ export const anilistService = {
                 episodes
                 status
                 format
-                siteUrl
+                genres
                 nextAiringEpisode {
                   episode
                   airingAt
@@ -538,7 +571,6 @@ export const anilistService = {
                   userPreferred?: string | null;
                 };
                 coverImage: {
-                  extraLarge?: string | null;
                   large?: string | null;
                   medium?: string | null;
                   color?: string | null;
@@ -547,7 +579,7 @@ export const anilistService = {
                 episodes?: number | null;
                 status: string;
                 format?: string | null;
-                siteUrl?: string | null;
+                genres?: string[];
                 nextAiringEpisode?: {
                   episode: number;
                   airingAt: number;
@@ -568,32 +600,33 @@ export const anilistService = {
           entry.media.title.romaji ||
           'Untitled Anime';
 
+        const largeCover =
+          entry.media.coverImage?.large ||
+          entry.media.coverImage?.medium ||
+          'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+
         return {
           mediaId: entry.media.id,
           listEntryId: entry.id,
           title: preferredTitle,
-          coverImage:
-            entry.media.coverImage?.large ||
-            entry.media.coverImage?.extraLarge ||
-            'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg',
+          coverImage: largeCover,
           coverImageMedium:
             entry.media.coverImage?.medium ||
-            entry.media.coverImage?.large ||
-            entry.media.coverImage?.extraLarge ||
-            'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/default.jpg',
-          coverImageExtraLarge:
-            entry.media.coverImage?.extraLarge ||
-            entry.media.coverImage?.large ||
-            'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg',
+            largeCover,
+          coverImageExtraLarge: largeCover,
           coverColor: entry.media.coverImage?.color || null,
-          userScore: entry.score !== undefined && entry.score !== null ? Number(entry.score) : null,
+          userScore:
+            entry.score !== undefined && entry.score !== null && Number(entry.score) > 0
+              ? Number(entry.score)
+              : null,
           userStatus: entry.status,
           averageScore: entry.media.averageScore ?? null,
           progress: entry.progress ?? 0,
           episodes: entry.media.episodes ?? null,
           status: entry.status,
           format: entry.media.format || 'TV',
-          siteUrl: entry.media.siteUrl || `https://anilist.co/anime/${entry.media.id}`,
+          genres: entry.media.genres || [],
+          siteUrl: `https://anilist.co/anime/${entry.media.id}`,
           nextAiringEpisode: entry.media.nextAiringEpisode
             ? {
                 episode: entry.media.nextAiringEpisode.episode,
@@ -630,6 +663,7 @@ export const anilistService = {
 
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'DEMO_MODE_ACTIVE') {
+        const { MOCK_WATCHING_LIST } = await loadMockData();
         return MOCK_WATCHING_LIST;
       }
       const cached = await storageService.getCachedWatchingList();
@@ -639,11 +673,16 @@ export const anilistService = {
   },
 
   getCachedAnimeDetailsSync(mediaId: number): AnimeDetail | null {
-    if (detailsCache.has(mediaId)) {
-      return detailsCache.get(mediaId)!;
+    const inRam = getBoundedCache(detailsCache, mediaId);
+    if (inRam && inRam.mediaStatus) {
+      return inRam;
     }
     const persisted = storageService.getCachedAnimeDetailSync(mediaId);
-    if (persisted?.detail && Array.isArray(persisted.detail.characters)) {
+    if (
+      persisted?.detail &&
+      Array.isArray(persisted.detail.characters) &&
+      Boolean(persisted.detail.mediaStatus)
+    ) {
       setBoundedCache(detailsCache, mediaId, persisted.detail);
       return persisted.detail;
     }
@@ -651,20 +690,41 @@ export const anilistService = {
   },
 
   prefetchAnimeDetails(mediaId: number): void {
-    if (this.getCachedAnimeDetailsSync(mediaId) || inFlightDetailsPromises.has(mediaId)) {
+    // Limit concurrency to 1, preserve rate-limit headroom, and cap per-session prefetches
+    if (
+      this.getCachedAnimeDetailsSync(mediaId) ||
+      inFlightDetailsPromises.size > 0 ||
+      rateLimitState.remaining < 40 ||
+      sessionPrefetchCount >= MAX_SESSION_PREFETCHES
+    ) {
       return;
     }
-    if (rateLimitState.remaining < 25) {
-      return;
-    }
-    this.getAnimeDetails(mediaId).catch(() => {});
+    sessionPrefetchCount++;
+    // Prefetch only into RAM (persistToDisk = false); disk persistence happens when modal actually opens
+    this.getAnimeDetails(mediaId, false, false).catch(() => {});
   },
 
-  async getAnimeDetails(mediaId: number, forceRefresh = false): Promise<AnimeDetail> {
+  async getAnimeDetails(
+    mediaId: number,
+    forceRefresh = false,
+    persistToDisk = true
+  ): Promise<AnimeDetail> {
     if (!forceRefresh) {
       const cached = this.getCachedAnimeDetailsSync(mediaId);
       if (cached) {
+        if (persistToDisk && !storageService.getCachedAnimeDetailSync(mediaId)) {
+          storageService.setCachedAnimeDetail(mediaId, cached).catch(() => {});
+        }
         return cached;
+      }
+      const persisted = await storageService.getCachedAnimeDetail(mediaId);
+      if (
+        persisted?.detail &&
+        Array.isArray(persisted.detail.characters) &&
+        Boolean(persisted.detail.mediaStatus)
+      ) {
+        setBoundedCache(detailsCache, mediaId, persisted.detail);
+        return persisted.detail;
       }
     }
 
@@ -674,6 +734,7 @@ export const anilistService = {
 
     const isDemo = await storageService.isDemoMode();
     if (isDemo) {
+      const { MOCK_WATCHING_LIST } = await loadMockData();
       const mockItem =
         MOCK_WATCHING_LIST.find((m) => m.mediaId === mediaId) || MOCK_WATCHING_LIST[0];
       const mockDetail: AnimeDetail = {
@@ -684,6 +745,7 @@ export const anilistService = {
         studios: ['Demo Animation Studio'],
         season: 'FALL',
         seasonYear: 2024,
+        mediaStatus: mockItem.nextAiringEpisode ? 'RELEASING' : 'FINISHED',
         duration: 24,
         description: 'An exciting story following unique characters on an unforgettable journey.',
         nextAiringEpisode: mockItem.nextAiringEpisode || null,
@@ -693,6 +755,7 @@ export const anilistService = {
             relationType: 'PREQUEL',
             title: 'Frieren: Beyond Journey’s End Season 1',
             format: 'TV',
+            seasonYear: 2023,
             status: 'FINISHED',
             coverImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-n1HJZcLrqJgg.jpg'
           },
@@ -701,6 +764,7 @@ export const anilistService = {
             relationType: 'SEQUEL',
             title: 'Frieren: Beyond Journey’s End Season 2',
             format: 'TV',
+            seasonYear: 2026,
             status: 'NOT_YET_RELEASED',
             coverImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx173516-m3wPZ85Z1Uuh.jpg'
           },
@@ -709,6 +773,7 @@ export const anilistService = {
             relationType: 'SIDE_STORY',
             title: 'Sousou no Frieren: Tokubetsu-hen',
             format: 'ONA',
+            seasonYear: 2023,
             status: 'FINISHED',
             coverImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx153518-7FjO5qNvh5jU.jpg'
           }
@@ -773,6 +838,9 @@ export const anilistService = {
           format
           season
           seasonYear
+          startDate {
+            year
+          }
           studios(isMain: true) {
             nodes {
               id
@@ -815,6 +883,10 @@ export const anilistService = {
                   userPreferred
                 }
                 format
+                seasonYear
+                startDate {
+                  year
+                }
                 status
                 coverImage {
                   large
@@ -864,6 +936,9 @@ export const anilistService = {
           format?: string | null;
           season?: string | null;
           seasonYear?: number | null;
+          startDate?: {
+            year?: number | null;
+          } | null;
           studios?: {
             nodes?: Array<{ id: number; name: string }>;
           };
@@ -903,6 +978,10 @@ export const anilistService = {
                   userPreferred?: string | null;
                 };
                 format?: string | null;
+                seasonYear?: number | null;
+                startDate?: {
+                  year?: number | null;
+                } | null;
                 status?: string | null;
                 coverImage?: {
                   large?: string | null;
@@ -972,6 +1051,7 @@ export const anilistService = {
             relationType: edge.relationType,
             title: relTitle,
             format: node.format || null,
+            seasonYear: node.seasonYear ?? node.startDate?.year ?? null,
             status: node.status || null,
             coverImage:
               node.coverImage?.large ||
@@ -1055,16 +1135,19 @@ export const anilistService = {
         volumes: media.volumes ?? null,
         duration: media.duration ?? null,
         status: media.mediaListEntry?.status || 'PLANNING',
+        mediaStatus: media.status || null,
         userStatus: media.mediaListEntry?.status || null,
         userScore:
-          media.mediaListEntry?.score !== undefined && media.mediaListEntry?.score !== null
+          media.mediaListEntry?.score !== undefined &&
+          media.mediaListEntry?.score !== null &&
+          Number(media.mediaListEntry.score) > 0
             ? Number(media.mediaListEntry.score)
             : null,
         progress: media.mediaListEntry?.progress ?? 0,
         type: isMangaMedia ? 'MANGA' : 'ANIME',
         format: media.format || (isMangaMedia ? 'MANGA' : 'TV'),
         season: media.season || null,
-        seasonYear: media.seasonYear || null,
+        seasonYear: media.seasonYear ?? media.startDate?.year ?? null,
         studios: studiosList,
         siteUrl: media.siteUrl || (isMangaMedia ? `https://anilist.co/manga/${media.id}` : `https://anilist.co/anime/${media.id}`),
         relations,
@@ -1079,7 +1162,9 @@ export const anilistService = {
       };
 
       setBoundedCache(detailsCache, mediaId, detail);
-      storageService.setCachedAnimeDetail(mediaId, detail).catch(() => {});
+      if (persistToDisk) {
+        storageService.setCachedAnimeDetail(mediaId, detail).catch(() => {});
+      }
       return detail;
       } finally {
         inFlightDetailsPromises.delete(mediaId);
@@ -1102,6 +1187,7 @@ export const anilistService = {
 
     const isDemo = await storageService.isDemoMode();
     if (isDemo) {
+      const { MOCK_WATCHING_LIST } = await loadMockData();
       return MOCK_WATCHING_LIST.map((item) => ({
         ...item,
         status,
@@ -1111,11 +1197,16 @@ export const anilistService = {
 
     const cacheKey = `user_list_${userId}_${status}`;
     if (!forceRefresh) {
-      if (userListCache.has(cacheKey)) {
-        return userListCache.get(cacheKey)!;
+      const inRam = getBoundedCache(userListCache, cacheKey);
+      if (inRam && inRam.some((i) => Array.isArray(i.genres))) {
+        return inRam;
       }
       const diskData = await storageService.getCachedStatusList(userId, status);
-      if (diskData && Date.now() - diskData.cachedAt < 300000) {
+      if (
+        diskData &&
+        Date.now() - diskData.cachedAt < 300000 &&
+        diskData.list.some((i) => Array.isArray(i.genres))
+      ) {
         setBoundedCache(userListCache, cacheKey, diskData.list);
         return diskData.list;
       }
@@ -1125,8 +1216,6 @@ export const anilistService = {
       query UserAnimeListByStatus($userId: Int, $status: MediaListStatus) {
         MediaListCollection(userId: $userId, type: ANIME, status: $status) {
           lists {
-            name
-            status
             entries {
               id
               mediaId
@@ -1141,7 +1230,6 @@ export const anilistService = {
                   userPreferred
                 }
                 coverImage {
-                  extraLarge
                   large
                   medium
                   color
@@ -1150,7 +1238,7 @@ export const anilistService = {
                 episodes
                 status
                 format
-                siteUrl
+                genres
                 nextAiringEpisode {
                   episode
                   airingAt
@@ -1181,7 +1269,6 @@ export const anilistService = {
                   userPreferred?: string | null;
                 };
                 coverImage: {
-                  extraLarge?: string | null;
                   large?: string | null;
                   medium?: string | null;
                   color?: string | null;
@@ -1190,7 +1277,7 @@ export const anilistService = {
                 episodes?: number | null;
                 status: string;
                 format?: string | null;
-                siteUrl?: string | null;
+                genres?: string[];
                 nextAiringEpisode?: {
                   episode: number;
                   airingAt: number;
@@ -1211,32 +1298,33 @@ export const anilistService = {
           entry.media.title.romaji ||
           'Untitled Anime';
 
+        const largeCover =
+          entry.media.coverImage?.large ||
+          entry.media.coverImage?.medium ||
+          'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+
         return {
           mediaId: entry.media.id,
           listEntryId: entry.id,
           title: preferredTitle,
-          coverImage:
-            entry.media.coverImage?.large ||
-            entry.media.coverImage?.extraLarge ||
-            'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg',
+          coverImage: largeCover,
           coverImageMedium:
             entry.media.coverImage?.medium ||
-            entry.media.coverImage?.large ||
-            entry.media.coverImage?.extraLarge ||
-            'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/default.jpg',
-          coverImageExtraLarge:
-            entry.media.coverImage?.extraLarge ||
-            entry.media.coverImage?.large ||
-            'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg',
+            largeCover,
+          coverImageExtraLarge: largeCover,
           coverColor: entry.media.coverImage?.color || null,
-          userScore: entry.score !== undefined && entry.score !== null ? Number(entry.score) : null,
+          userScore:
+            entry.score !== undefined && entry.score !== null && Number(entry.score) > 0
+              ? Number(entry.score)
+              : null,
           userStatus: entry.status,
           averageScore: entry.media.averageScore ?? null,
           progress: entry.progress ?? 0,
           episodes: entry.media.episodes ?? null,
           status: entry.status,
           format: entry.media.format || 'TV',
-          siteUrl: entry.media.siteUrl || `https://anilist.co/anime/${entry.media.id}`,
+          genres: entry.media.genres || [],
+          siteUrl: `https://anilist.co/anime/${entry.media.id}`,
           nextAiringEpisode: entry.media.nextAiringEpisode
             ? {
                 episode: entry.media.nextAiringEpisode.episode,
@@ -1256,12 +1344,12 @@ export const anilistService = {
       await storageService.setCachedStatusList(userId, status, normalized);
 
       // Reconcile user profile stats with real list length
-      const statusKeyMap: Record<MediaListStatus, 'watching' | 'completed' | 'planning' | 'paused' | null> = {
+      const statusKeyMap: Record<MediaListStatus, 'watching' | 'completed' | 'planning' | 'paused' | 'dropped' | null> = {
         CURRENT: 'watching',
         COMPLETED: 'completed',
         PLANNING: 'planning',
         PAUSED: 'paused',
-        DROPPED: null,
+        DROPPED: 'dropped',
         REPEATING: null
       };
       const statKey = statusKeyMap[status];
@@ -1281,6 +1369,7 @@ export const anilistService = {
         throw err;
       }
       if (err instanceof Error && err.message === 'DEMO_MODE_ACTIVE') {
+        const { MOCK_WATCHING_LIST } = await loadMockData();
         return MOCK_WATCHING_LIST;
       }
       const diskData = await storageService.getCachedStatusList(userId, status);
@@ -1301,7 +1390,11 @@ export const anilistService = {
       await new Promise((resolve) => setTimeout(resolve, 300));
       const status: MediaListStatus =
         totalEpisodes && progress >= totalEpisodes ? 'COMPLETED' : 'CURRENT';
-      updateItemInCaches(mediaId, { progress, status, userStatus: status });
+      updateItemInCaches(
+        mediaId,
+        { progress, status, userStatus: status },
+        { skipWatchingList: true }
+      );
       if (status === 'COMPLETED') {
         invalidateStatusListCache('CURRENT');
         invalidateStatusListCache('COMPLETED');
@@ -1334,12 +1427,16 @@ export const anilistService = {
 
     const result = data.SaveMediaListEntry;
 
-    // Selective Invalidation: update item in memory & disk caches without wiping everything
-    updateItemInCaches(mediaId, {
-      progress: result.progress,
-      status: result.status,
-      userStatus: result.status
-    });
+    // Selective Invalidation: update item in memory & detail caches; watchingList disk write is handled by AnimeContext
+    updateItemInCaches(
+      mediaId,
+      {
+        progress: result.progress,
+        status: result.status,
+        userStatus: result.status
+      },
+      { skipWatchingList: true }
+    );
 
     if (result.status === 'COMPLETED') {
       invalidateStatusListCache('CURRENT');
@@ -1412,6 +1509,7 @@ export const anilistService = {
 
     const isDemo = await storageService.isDemoMode();
     if (isDemo) {
+      const { MOCK_SEARCH_RESULTS } = await loadMockData();
       const filtered = MOCK_SEARCH_RESULTS.filter((a) =>
         a.title.toLowerCase().includes(trimmed.toLowerCase())
       );
@@ -1426,8 +1524,9 @@ export const anilistService = {
     }
 
     const cacheKey = `${trimmed.toLowerCase()}_${page}_${perPage}`;
-    if (searchCache.has(cacheKey)) {
-      return searchCache.get(cacheKey)!;
+    const cachedSearch = getBoundedCache(searchCache, cacheKey);
+    if (cachedSearch) {
+      return cachedSearch;
     }
 
     const graphQuery = `
@@ -1455,6 +1554,10 @@ export const anilistService = {
             episodes
             status
             format
+            seasonYear
+            startDate {
+              year
+            }
             siteUrl
             genres
             mediaListEntry {
@@ -1468,7 +1571,7 @@ export const anilistService = {
       }
     `;
 
-    const fetchPerPage = page === 1 ? Math.max(perPage, 25) : perPage;
+    const fetchPerPage = perPage;
     const data = await executeGraphQL<{
       Page: {
         pageInfo?: {
@@ -1493,6 +1596,10 @@ export const anilistService = {
           episodes?: number | null;
           status: string;
           format?: string | null;
+          seasonYear?: number | null;
+          startDate?: {
+            year?: number | null;
+          } | null;
           siteUrl?: string | null;
           genres?: string[];
           mediaListEntry?: {
@@ -1617,13 +1724,17 @@ export const anilistService = {
           item.coverImage?.large ||
           'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg',
         coverColor: item.coverImage?.color || null,
-        userScore: entry?.score !== undefined && entry?.score !== null ? Number(entry.score) : null,
+        userScore:
+          entry?.score !== undefined && entry?.score !== null && Number(entry.score) > 0
+            ? Number(entry.score)
+            : null,
         userStatus: entry?.status || null,
         averageScore: item.averageScore ?? null,
         progress: entry?.progress ?? 0,
         episodes: item.episodes ?? null,
         status: entry?.status || 'PLANNING',
         format: item.format || 'TV',
+        seasonYear: item.seasonYear ?? item.startDate?.year ?? null,
         siteUrl: item.siteUrl || `https://anilist.co/anime/${item.id}`,
         genres: item.genres || []
       };
@@ -1668,6 +1779,7 @@ export const anilistService = {
 
     const isDemo = await storageService.isDemoMode();
     if (isDemo) {
+      const { MOCK_SEARCH_RESULTS } = await loadMockData();
       let list = [...MOCK_SEARCH_RESULTS];
       if (mode === 'UPCOMING') {
         const upcoming = list.filter((m) => m.status === 'PLANNING' || m.mediaId >= 160000);
@@ -1693,8 +1805,9 @@ export const anilistService = {
         ? [...genresList].sort().join('-').toLowerCase()
         : 'all';
     const cacheKey = `discover_${mode}_${genreKey}_${page}_${perPage}`;
-    if (searchCache.has(cacheKey)) {
-      return searchCache.get(cacheKey)!;
+    const cachedDiscover = getBoundedCache(searchCache, cacheKey);
+    if (cachedDiscover) {
+      return cachedDiscover;
     }
 
     let sortParam: string[];
@@ -1737,6 +1850,10 @@ export const anilistService = {
             episodes
             status
             format
+            seasonYear
+            startDate {
+              year
+            }
             siteUrl
             genres
             mediaListEntry {
@@ -1773,6 +1890,10 @@ export const anilistService = {
           episodes?: number | null;
           status: string;
           format?: string | null;
+          seasonYear?: number | null;
+          startDate?: {
+            year?: number | null;
+          } | null;
           siteUrl?: string | null;
           genres?: string[];
           mediaListEntry?: {
@@ -1815,13 +1936,17 @@ export const anilistService = {
           item.coverImage?.large ||
           'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg',
         coverColor: item.coverImage?.color || null,
-        userScore: entry?.score !== undefined && entry?.score !== null ? Number(entry.score) : null,
+        userScore:
+          entry?.score !== undefined && entry?.score !== null && Number(entry.score) > 0
+            ? Number(entry.score)
+            : null,
         userStatus: entry?.status || null,
         averageScore: item.averageScore ?? null,
         progress: entry?.progress ?? 0,
         episodes: item.episodes ?? null,
         status: entry?.status || 'PLANNING',
         format: item.format || 'TV',
+        seasonYear: item.seasonYear ?? item.startDate?.year ?? null,
         siteUrl: item.siteUrl || `https://anilist.co/anime/${item.id}`,
         genres: item.genres || []
       };
@@ -1861,8 +1986,8 @@ export const anilistService = {
       if (correction && correction.toLowerCase() !== trimmed.toLowerCase()) {
         // If the correction is already in memory cache, return it instantly at 0 network cost!
         const cacheKey = `${correction.toLowerCase()}_1_${perPage}`;
-        if (searchCache.has(cacheKey)) {
-          const cached = searchCache.get(cacheKey)!;
+        const cached = getBoundedCache(searchCache, cacheKey);
+        if (cached) {
           return {
             results: cached.results,
             hasNextPage: cached.hasNextPage,
@@ -1892,14 +2017,14 @@ export const anilistService = {
   async addAnimeToList(
     mediaId: number,
     status: MediaListStatus = 'CURRENT'
-  ): Promise<{ id: number; mediaId: number; status: MediaListStatus }> {
+  ): Promise<{ id: number; mediaId: number; status: MediaListStatus; progress: number }> {
     const isDemo = await storageService.isDemoMode();
     if (isDemo) {
       await new Promise((resolve) => setTimeout(resolve, 300));
       updateItemInCaches(mediaId, { status, userStatus: status });
       invalidateStatusListCache(status);
       invalidateStatusListCache('CURRENT');
-      return { id: Math.floor(Math.random() * 10000), mediaId, status };
+      return { id: Math.floor(Math.random() * 10000), mediaId, status, progress: 0 };
     }
 
     const mutation = `
@@ -1929,8 +2054,12 @@ export const anilistService = {
 
     const entry = data.SaveMediaListEntry;
 
-    // Selective update: update card status in search/discover/lists without blowing away caches
-    updateItemInCaches(mediaId, { status: entry.status, userStatus: entry.status });
+    // Selective update: update card status and preserve existing progress in caches
+    updateItemInCaches(mediaId, {
+      status: entry.status,
+      userStatus: entry.status,
+      progress: entry.progress
+    });
     invalidateStatusListCache(entry.status);
     invalidateStatusListCache('CURRENT');
 

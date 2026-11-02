@@ -12,25 +12,9 @@
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 400 600;
   font-display: swap;
   src: url('/fonts/jetbrainsmono-latin-400.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/jetbrainsmono-latin-500.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/jetbrainsmono-latin-600.woff2') format('woff2');
 }
 
 /* ========================================================
@@ -66,6 +50,10 @@
   --color-planning-bg: #f5f3ff;
   --color-paused: #d97706;
   --color-paused-bg: #fef3c7;
+  --color-score: #b45309;
+  --color-score-star: #f59e0b;
+  --color-score-bg: #fef3c7;
+  --color-score-border: rgba(245, 158, 11, 0.45);
   --color-skeleton-base: #ece8df;
   --color-skeleton-highlight: #fcfbf9;
 }
@@ -98,6 +86,10 @@
   --color-planning-bg: #271438;
   --color-paused: #fbbf24;
   --color-paused-bg: #2b1d09;
+  --color-score: #fde68a;
+  --color-score-star: #fbbf24;
+  --color-score-bg: rgba(245, 158, 11, 0.16);
+  --color-score-border: rgba(251, 191, 36, 0.45);
   --color-skeleton-base: #20201e;
   --color-skeleton-highlight: #343430;
 }
@@ -239,24 +231,31 @@ input {
 
 @keyframes skeleton-shimmer {
   0% {
-    background-position: -200% 0;
+    transform: translateX(-100%);
   }
   100% {
-    background-position: 200% 0;
+    transform: translateX(100%);
   }
 }
 
 .skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-skeleton-base);
+}
+
+.skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
   background: linear-gradient(
     90deg,
-    var(--color-skeleton-base) 0%,
-    var(--color-skeleton-base) 25%,
+    transparent 0%,
     var(--color-skeleton-highlight) 50%,
-    var(--color-skeleton-base) 75%,
-    var(--color-skeleton-base) 100%
+    transparent 100%
   );
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation: skeleton-shimmer 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
 }
 
 /* Tab Slide & Fade Transitions (Smooth Left-Right Slide) */
@@ -289,7 +288,6 @@ input {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  will-change: transform, opacity;
 }
 
 .tab-pane-transition-backward {
@@ -299,7 +297,6 @@ input {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  will-change: transform, opacity;
 }
 
 /* Animated Search Bar Micro-Interactions */
@@ -406,12 +403,63 @@ input {
 }
 
 .card-icon-btn-subtle {
-  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, filter 0.15s ease;
 }
 .card-icon-btn-subtle:hover {
   color: var(--color-primary) !important;
   border-color: var(--color-border-hover) !important;
   background-color: var(--color-card-subtle) !important;
+}
+
+.card-ext-link-plain {
+  transition: color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+}
+.card-ext-link-plain:hover {
+  color: var(--color-primary) !important;
+  opacity: 1 !important;
+  transform: translate(1px, -1px);
+}
+
+.user-score-badge-btn {
+  transition: filter 0.15s ease, transform 0.12s ease, border-color 0.15s ease;
+}
+.user-score-badge-btn:hover {
+  filter: brightness(1.12);
+}
+.user-score-badge-btn:active {
+  transform: scale(0.96);
+}
+
+.banner-glass-btn {
+  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease, transform 0.12s ease;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+.banner-glass-btn:hover {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+.banner-glass-btn:active {
+  transform: scale(0.94);
+}
+
+.banner-pill-segment {
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+.banner-pill-segment:hover {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+.banner-pill-segment:active {
+  background-color: rgba(255, 255, 255, 0.22) !important;
+}
+
+.surface-pill-segment {
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+.surface-pill-segment:hover {
+  background-color: var(--color-card-subtle) !important;
+  color: var(--color-primary) !important;
 }
 
 .card-status-badge-btn {
